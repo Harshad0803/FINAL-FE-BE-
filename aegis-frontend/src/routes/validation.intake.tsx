@@ -203,6 +203,83 @@ function Intake() {
   const [chkPlanApproved, setChkPlanApproved] = useState(false);
   const [chkAttestation, setChkAttestation] = useState(false);
 
+  // This page's own form/checklist state lives in local useState (not
+  // DatasetContext), so it needs its own small persistence layer to survive
+  // a refresh — same localStorage pattern app-context.tsx uses for the
+  // shared dataset/validation state. Restored once on mount; every change
+  // after that re-saves the whole snapshot.
+  // `isRestored` must be React state, not a ref: the write-effect below
+  // needs to skip a render entirely between "restore finished" and "write
+  // effect re-checks its guard" — a ref flip doesn't force that extra
+  // render, so the write effect would still fire once with pre-restore
+  // (default) values and clobber the just-read localStorage entry before
+  // the restored state ever painted. Mirrors app-context.tsx's isHydrated.
+  const [isRestored, setIsRestored] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setIsRestored(true);
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem("aegis_intake_form_state");
+      if (stored) {
+        const s = JSON.parse(stored);
+        setIntake(s.intake ?? emptyIntake);
+        setIntakeLoaded(Boolean(s.intakeLoaded));
+        setModelName(s.modelName ?? "");
+        setOwningTeam(s.owningTeam ?? "");
+        setModelOwner(s.modelOwner ?? "");
+        setLeadValidator(s.leadValidator ?? "");
+        setModelType(s.modelType ?? "PD (Probability of Default)");
+        setTier(s.tier ?? "Tier 2 — Medium Risk");
+        setVersion(s.version ?? "");
+        setPurpose(s.purpose ?? "");
+        setDemoMode(s.demoMode ?? null);
+        setMddFileName(s.mddFileName ?? null);
+        setMddText(s.mddText ?? null);
+        setMddMetrics(s.mddMetrics ?? null);
+        setTrainingCodeFileName(s.trainingCodeFileName ?? null);
+        setPerfFileName(s.perfFileName ?? null);
+        setProfileFileName(s.profileFileName ?? null);
+        setAssumptionsFileName(s.assumptionsFileName ?? null);
+        setHyperparamsFileName(s.hyperparamsFileName ?? null);
+        setChkInventory(Boolean(s.chkInventory));
+        setChkTier(Boolean(s.chkTier));
+        setChkArtifacts(Boolean(s.chkArtifacts));
+        setChkPrevFindings(Boolean(s.chkPrevFindings));
+        setChkRegScope(Boolean(s.chkRegScope));
+        setChkIndependence(Boolean(s.chkIndependence));
+        setChkPlanApproved(Boolean(s.chkPlanApproved));
+        setChkAttestation(Boolean(s.chkAttestation));
+      }
+    } catch {
+      // Ignore invalid stored state
+    } finally {
+      setIsRestored(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isRestored) return;
+    const snapshot = {
+      intake, intakeLoaded, modelName, owningTeam, modelOwner, leadValidator, modelType, tier, version, purpose,
+      demoMode, mddFileName, mddText, mddMetrics, trainingCodeFileName, perfFileName, profileFileName,
+      assumptionsFileName, hyperparamsFileName, chkInventory, chkTier, chkArtifacts, chkPrevFindings, chkRegScope,
+      chkIndependence, chkPlanApproved, chkAttestation,
+    };
+    try {
+      window.localStorage.setItem("aegis_intake_form_state", JSON.stringify(snapshot));
+    } catch (err) {
+      console.warn("Failed to persist intake form state to localStorage:", err);
+    }
+  }, [
+    intake, intakeLoaded, modelName, owningTeam, modelOwner, leadValidator, modelType, tier, version, purpose,
+    demoMode, mddFileName, mddText, mddMetrics, trainingCodeFileName, perfFileName, profileFileName,
+    assumptionsFileName, hyperparamsFileName, chkInventory, chkTier, chkArtifacts, chkPrevFindings, chkRegScope,
+    chkIndependence, chkPlanApproved, chkAttestation, isRestored,
+  ]);
+
   const datasetUploaded = Boolean(datasetFile || profile?.dataset_name);
   const mddUploaded = Boolean(mddFileName || mddText);
   const trainingCodeUploaded = Boolean(trainingCodeFileName);

@@ -131,14 +131,46 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
       }
 
       const parsed = JSON.parse(stored) as {
+        profile?: DatasetProfile | null;
+        recommendations?: ModelRecommendation[] | null;
+        preprocessingResult?: Record<string, any> | null;
+        featureEngineeringResult?: Record<string, any> | null;
         trainingConfig?: TrainingConfig | null;
         trainingResult?: TrainingResult | null;
         comparisonResults?: ComparisonResult[] | null;
         compareModels?: string[] | null;
         selectedModel?: ModelRecommendation | null;
         selectedComparisonModel?: string | null;
+        validationIntakeData?: Record<string, any> | null;
+        validationMddText?: string | null;
+        validationMddMetrics?: Record<string, any> | null;
+        validationProfile?: Record<string, any> | null;
+        validationResults?: Record<string, any> | null;
+        validationStage3Result?: Record<string, any> | null;
+        validationStage4Result?: Record<string, any> | null;
+        validationStage5Result?: Record<string, any> | null;
+        validationStage7Result?: Record<string, any> | null;
+        validationStage7BiasResult?: Record<string, any> | null;
+        validationStage8Result?: Record<string, any> | null;
       };
 
+      // `file` (a raw File object) is deliberately not persisted/restored —
+      // it can't survive JSON serialization anyway. Every page that needs
+      // the dataset already falls back to `profile.csv_text` (which /data/
+      // upload always echoes back) whenever `file` is null, so restoring
+      // just `profile` here is enough to carry the dataset itself forward.
+      if (parsed.profile) {
+        setProfile(parsed.profile);
+      }
+      if (parsed.recommendations) {
+        setRecommendations(parsed.recommendations);
+      }
+      if (parsed.preprocessingResult) {
+        setPreprocessingResultState(parsed.preprocessingResult);
+      }
+      if (parsed.featureEngineeringResult) {
+        setFeatureEngineeringResultState(parsed.featureEngineeringResult);
+      }
       if (parsed.trainingConfig) {
         setTrainingConfigState(parsed.trainingConfig);
       }
@@ -156,6 +188,39 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
       }
       if (parsed.selectedComparisonModel) {
         setSelectedComparisonModelState(parsed.selectedComparisonModel);
+      }
+      if (parsed.validationIntakeData) {
+        setValidationIntakeDataState(parsed.validationIntakeData);
+      }
+      if (parsed.validationMddText) {
+        setValidationMddTextState(parsed.validationMddText);
+      }
+      if (parsed.validationMddMetrics) {
+        setValidationMddMetricsState(parsed.validationMddMetrics);
+      }
+      if (parsed.validationProfile) {
+        setValidationProfileState(parsed.validationProfile);
+      }
+      if (parsed.validationResults) {
+        setValidationResultsState(parsed.validationResults);
+      }
+      if (parsed.validationStage3Result) {
+        setValidationStage3ResultState(parsed.validationStage3Result);
+      }
+      if (parsed.validationStage4Result) {
+        setValidationStage4ResultState(parsed.validationStage4Result);
+      }
+      if (parsed.validationStage5Result) {
+        setValidationStage5ResultState(parsed.validationStage5Result);
+      }
+      if (parsed.validationStage7Result) {
+        setValidationStage7ResultState(parsed.validationStage7Result);
+      }
+      if (parsed.validationStage7BiasResult) {
+        setValidationStage7BiasResultState(parsed.validationStage7BiasResult);
+      }
+      if (parsed.validationStage8Result) {
+        setValidationStage8ResultState(parsed.validationStage8Result);
       }
     } catch {
       // Ignore invalid stored state
@@ -176,12 +241,27 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
     // whole app on every training run.
     const { model_artifact, ...trainingResultToPersist } = trainingResult ?? {};
     const persisted = {
+      profile,
+      recommendations,
+      preprocessingResult,
+      featureEngineeringResult,
       trainingConfig,
       trainingResult: trainingResult ? trainingResultToPersist : null,
       comparisonResults,
       compareModels,
       selectedModel,
       selectedComparisonModel,
+      validationIntakeData,
+      validationMddText,
+      validationMddMetrics,
+      validationProfile,
+      validationResults,
+      validationStage3Result,
+      validationStage4Result,
+      validationStage5Result,
+      validationStage7Result,
+      validationStage7BiasResult,
+      validationStage8Result,
     };
 
     try {
@@ -191,7 +271,30 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
       // fine in memory for this session, it just won't survive a refresh.
       console.warn("Failed to persist dataset state to localStorage:", err);
     }
-  }, [trainingConfig, trainingResult, comparisonResults, compareModels, selectedModel, selectedComparisonModel, isHydrated]);
+  }, [
+    profile,
+    recommendations,
+    preprocessingResult,
+    featureEngineeringResult,
+    trainingConfig,
+    trainingResult,
+    comparisonResults,
+    compareModels,
+    selectedModel,
+    selectedComparisonModel,
+    validationIntakeData,
+    validationMddText,
+    validationMddMetrics,
+    validationProfile,
+    validationResults,
+    validationStage3Result,
+    validationStage4Result,
+    validationStage5Result,
+    validationStage7Result,
+    validationStage7BiasResult,
+    validationStage8Result,
+    isHydrated,
+  ]);
 
   const setUploadResult = React.useCallback((f: File | null, p: DatasetProfile | null) => {
     setFile(f);
@@ -313,6 +416,7 @@ export function DatasetProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== "undefined") {
       try {
         window.localStorage.removeItem("aegis_dataset_state");
+        window.localStorage.removeItem("aegis_intake_form_state");
       } catch {
         // Ignore storage failures — in-memory state is already cleared.
       }
