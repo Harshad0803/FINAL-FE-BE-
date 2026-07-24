@@ -4005,37 +4005,44 @@ async def validation_stage8_findings(
             "recommendation": "Remove duplicate records before training",
             "regulation": "SS1/23 P3.2"})
 
-    # Stage 3 MDD findings
-    for kw, check, finding, rec, reg, sev in [
+    # MDD findings — Calibration/IFRS 9 Staging are Regulatory Compliance
+    # checks (now under Stage 6: Explainability and Fairness); Limitations/
+    # Assumptions are Conceptual Soundness checks and Forward-Looking
+    # Documentation is a Data Validation check (both now under Stage 2:
+    # Data & Model Soundness). These used to be lumped into one "Stage 3/7"
+    # bucket before Conceptual Soundness (old Stage 3) and Regulatory
+    # Compliance (old Stage 7) were merged into different current stages —
+    # they no longer belong together at all, let alone under one heading.
+    for kw, check, finding, rec, reg, sev, stage in [
         (CALIBRATION_KEYWORDS, "7.1 Calibration",
-         "MDD has no calibration section", "Document PD calibration methodology", "IFRS 9 §5.5", "HIGH"),
+         "MDD has no calibration section", "Document PD calibration methodology", "IFRS 9 §5.5", "HIGH", "Stage 6"),
         (STAGING_KEYWORDS, "7.2 IFRS 9 Staging",
-         "MDD does not describe IFRS 9 staging logic", "Add Stage 1/2/3 classification and SICR triggers", "IFRS 9 §5.5.3", "HIGH"),
+         "MDD does not describe IFRS 9 staging logic", "Add Stage 1/2/3 classification and SICR triggers", "IFRS 9 §5.5.3", "HIGH", "Stage 6"),
         (["limitation", "weakness"], "3.4 Limitations",
-         "MDD has no limitations section", "Add model limitations per SS1/23 P3.4", "SS1/23 P3.4", "HIGH"),
+         "MDD has no limitations section", "Add model limitations per SS1/23 P3.4", "SS1/23 P3.4", "HIGH", "Stage 2"),
         (["assumption"], "3.3 Assumptions",
-         "MDD does not document model assumptions", "Document all modelling assumptions with rationale", "SS1/23 P3.3", "MEDIUM"),
+         "MDD does not document model assumptions", "Document all modelling assumptions with rationale", "SS1/23 P3.3", "MEDIUM", "Stage 2"),
         (["macro", "gdp", "unemployment"], "2.4b Forward-Looking Documentation (MDD)",
-         "MDD does not reference macro/forward-looking variables", "Add macro overlay per IFRS 9 B5.5.49", "IFRS 9 B5.5.49", "MEDIUM"),
+         "MDD does not reference macro/forward-looking variables", "Add macro overlay per IFRS 9 B5.5.49", "IFRS 9 B5.5.49", "MEDIUM", "Stage 2"),
     ]:
         if not any(k in mdd_lower for k in kw):
-            all_findings.append({"stage": "Stage 3/7", "check": check,
+            all_findings.append({"stage": stage, "check": check,
                 "severity": sev, "status": "FAIL",
                 "finding": finding, "recommendation": rec, "regulation": reg})
 
-    # Stage 4 — AUC replication gap
+    # Stage 3 (Model Replication, was old Stage 4) — AUC replication gap
     stated_auc = ij.get("stated_auc")
     rep_auc = rep_metrics.get("roc_auc")
     if stated_auc and rep_auc:
         gap = abs(float(stated_auc) - float(rep_auc))
         if gap > 0.05:
-            all_findings.append({"stage": "Stage 4", "check": "4.2 AUC Replication",
+            all_findings.append({"stage": "Stage 3", "check": "4.2 AUC Replication",
                 "severity": "HIGH", "status": "FAIL",
                 "finding": f"AUC gap of {gap:.4f} — stated {stated_auc:.4f} vs replicated {rep_auc:.4f}",
                 "recommendation": "Developer must reconcile stated and replicated performance before resubmission",
                 "regulation": "SS1/23 P4.1"})
 
-    # Stage 5 — metric thresholds
+    # Stage 4 (Performance Testing, was old Stage 5) — metric thresholds
     for metric, val, threshold, op, check, reg, sev in [
         ("ROC-AUC", rep_auc, 0.70, ">=", "5.1 ROC-AUC", "SS1/23 P4.1", "HIGH"),
         ("Recall", rep_metrics.get("recall"), 0.60, ">=", "5.2 Recall", "SS1/23 P4.4", "HIGH"),
@@ -4045,33 +4052,33 @@ async def validation_stage8_findings(
         if val is not None:
             failed = (op == ">=" and val < threshold) or (op == "<=" and val > threshold)
             if failed:
-                all_findings.append({"stage": "Stage 5", "check": check,
+                all_findings.append({"stage": "Stage 4", "check": check,
                     "severity": sev, "status": "FAIL",
                     "finding": f"{metric} = {val:.4f} — below regulatory minimum {op} {threshold}",
                     "recommendation": f"Model does not meet minimum {metric} threshold — consider retraining or additional data",
                     "regulation": reg})
 
-    # Stage 5 — benchmarking
+    # Stage 4 (Performance Testing) — benchmarking
     if bm_metrics and rep_auc:
         bm_auc = bm_metrics.get("roc_auc", 0)
         if rep_auc < bm_auc - 0.02:
-            all_findings.append({"stage": "Stage 5", "check": "5.B Benchmarking",
+            all_findings.append({"stage": "Stage 4", "check": "5.B Benchmarking",
                 "severity": "MEDIUM", "status": "WARN",
                 "finding": f"Submitted model AUC ({rep_auc:.4f}) underperforms benchmark ({bm_auc:.4f})",
                 "recommendation": "Marginal improvement over baseline may not justify model complexity — review feature set",
                 "regulation": "SS1/23 P4.2"})
 
-    # Stage 6 — sensitivity shock
+    # Stage 5 (Stress & Backtesting, was old Stage 6) — sensitivity shock
     if shock_res and abs(shock_res.get("pd_change_pct", 0)) > 50:
-        all_findings.append({"stage": "Stage 6", "check": "6.1 Sensitivity",
+        all_findings.append({"stage": "Stage 5", "check": "6.1 Sensitivity",
             "severity": "MEDIUM", "status": "WARN",
             "finding": f"Shocking '{shock_res.get('feature')}' by {shock_res.get('magnitude_pct')}% changes avg PD by {shock_res.get('pd_change_pct', 0):.1f}%",
             "recommendation": "Model may be over-sensitive to this feature — validate stability with wider test",
             "regulation": "SS1/23 P4.3"})
 
-    # Stage 7 — bias
+    # Stage 6 (Explainability and Fairness, was old Stage 7) — bias
     if bias_auc_gap is not None and bias_auc_gap > 0.10:
-        all_findings.append({"stage": "Stage 7", "check": "8.2 Fair Lending",
+        all_findings.append({"stage": "Stage 6", "check": "8.2 Fair Lending",
             "severity": "HIGH", "status": "FAIL",
             "finding": f"AUC gap of {bias_auc_gap:.4f} across protected groups",
             "recommendation": "Investigate discriminatory bias — model may treat protected groups unfairly",

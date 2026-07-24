@@ -16,7 +16,7 @@ const stages = [
   { stage: 1, to: "/validation/intake", icon: FileText, title: "Intake & Governance", desc: "Model metadata, artifacts, risk tier, and governance attestation." },
   { stage: 2, to: "/validation/data-quality", icon: Database, title: "Data & Model Soundness", desc: "Automated dataset checks, leakage scan, sample representativeness, feature relevance, methodology, and assumptions." },
   { stage: 3, to: "/validation/challenger", icon: GitCompareArrows, title: "Model Replication", desc: "Independently reproduce developer outputs and verify the R4.1-R4.8 replication checks." },
-  { stage: 4, to: "/validation/performance", icon: BarChart3, title: "Performance Testing", desc: "AUC, KS, calibration, threshold analysis, hold-out validation, and champion vs challenger benchmarking." },
+  { stage: 4, to: "/validation/performance", icon: BarChart3, title: "Benchmarking", desc: "AUC, KS, calibration, threshold analysis, hold-out validation, and champion vs challenger benchmarking." },
   { stage: 5, to: "/validation/stress", icon: Activity, title: "Stress & Backtesting", desc: "Scenario simulations, stability, backtests, and stress results." },
   { stage: 6, to: "/validation/regulatory", icon: ShieldCheck, title: "Explainability and Fairness", desc: "SHAP feature importance, fair lending bias checks, IFRS 9 / IFRS 7 / SS1/23 review, and remediation." },
   { stage: 7, to: "/validation/findings", icon: ClipboardCheck, title: "Findings & Final Report", desc: "Final observations, risk grading, recommendation, and sign-off." },

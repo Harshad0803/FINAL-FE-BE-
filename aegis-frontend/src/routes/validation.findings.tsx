@@ -126,7 +126,7 @@ function metricThresholdRows(repMetrics: Record<string, any>): MetricThresholdRo
   }));
 }
 
-const STAGE_ORDER = ["Stage 1", "Stage 2", "Stage 3/7", "Stage 4", "Stage 5", "Stage 6", "Stage 7"];
+const STAGE_ORDER = ["Stage 1", "Stage 2", "Stage 3", "Stage 4", "Stage 5", "Stage 6"];
 
 function Findings() {
   const ds = useDataset();

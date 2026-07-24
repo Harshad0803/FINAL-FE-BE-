@@ -135,6 +135,11 @@ function Regulatory() {
   const [loading, setLoading] = useState(!validationStage7Result);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<Stage7Response | null>((validationStage7Result as Stage7Response | null) ?? null);
+  // Tracks which sub-tab is active so the bottom button can tell whether
+  // the reviewer is still on the first sub-tab (Explainability and
+  // Fairness — button just advances to Regulatory Compliance) or the last
+  // one (button navigates to Stage 7).
+  const [activeSubTab, setActiveSubTab] = useState<string>("explainability");
 
   const skipInitialAutoRun = useRef(validationStage7Result !== null && validationStage7Result !== undefined);
 
@@ -335,7 +340,7 @@ function Regulatory() {
       ) : error ? (
         <div className="rounded-xl border border-border bg-card p-6 text-destructive">Error loading Stage 6: {error}</div>
       ) : (
-        <Tabs defaultValue="explainability" className="w-full">
+        <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="w-full">
           <TabsList>
             <TabsTrigger value="explainability">Explainability and Fairness</TabsTrigger>
             <TabsTrigger value="compliance">Regulatory Compliance</TabsTrigger>
@@ -492,13 +497,24 @@ function Regulatory() {
       )}
 
       <div className="text-right">
-        <Link
-          to="/validation/findings"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
-        >
-          Continue to Stage 7
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+        {activeSubTab === "explainability" ? (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("compliance")}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          >
+            Continue
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        ) : (
+          <Link
+            to="/validation/findings"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          >
+            Continue to Stage 7
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        )}
       </div>
     </div>
   );

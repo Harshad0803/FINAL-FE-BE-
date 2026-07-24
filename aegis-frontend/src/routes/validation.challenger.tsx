@@ -123,7 +123,13 @@ const REPORTED_METRIC_FIELDS: Array<{ key: string; label: string }> = [
   { key: "cv_mean_auc", label: "CV Mean AUC" },
 ];
 
-function ModelReplicationPanel() {
+function ModelReplicationPanel({
+  activeSubTab,
+  setActiveSubTab,
+}: {
+  activeSubTab: string;
+  setActiveSubTab: (tab: string) => void;
+}) {
   const ds = useDataset();
 
   const [localFile, setLocalFile] = React.useState<File | null>(null);
@@ -708,7 +714,7 @@ function ModelReplicationPanel() {
                 </span>
               </div>
 
-              <Tabs defaultValue="replication" className="w-full">
+              <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="w-full">
                 <TabsList>
                   <TabsTrigger value="replication">Replication Checks</TabsTrigger>
                   <TabsTrigger value="performance">Performance</TabsTrigger>
@@ -907,6 +913,12 @@ function ModelReplicationPanel() {
 }
 
 function Challenger() {
+  // Tracks which sub-tab is active so the bottom button can tell whether
+  // the reviewer is still on the first sub-tab (Replication Checks —
+  // button just advances to Performance) or the last one (button
+  // navigates to Stage 4).
+  const [activeSubTab, setActiveSubTab] = React.useState<string>("replication");
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -914,9 +926,19 @@ function Challenger() {
         description="Independently reproduce the developer's submitted model, verify results against the R4.1-R4.8 replication checks, and review its full performance profile on data the model has never seen."
       />
 
-      <ModelReplicationPanel />
+      <ModelReplicationPanel activeSubTab={activeSubTab} setActiveSubTab={setActiveSubTab} />
 
       <div className="text-right">
+        {activeSubTab === "replication" ? (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("performance")}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          >
+            Continue
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        ) : (
         <Link
           to="/validation/performance"
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
@@ -924,6 +946,7 @@ function Challenger() {
           Continue to Stage 4 — Benchmarking
           <ArrowRight className="h-4 w-4" />
         </Link>
+        )}
       </div>
     </div>
   );

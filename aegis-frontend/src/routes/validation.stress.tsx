@@ -213,6 +213,32 @@ function Stress() {
     };
   }, [psiChartData]);
 
+  const sensitivityChartData = useMemo(() => {
+    const rows = report?.sensitivity?.rows ?? [];
+    return rows.map((r: any) => ({ feature: r.feature, "AUC drop": r.auc_drop }));
+  }, [report]);
+
+  const sensitivityFigure = useMemo(() => {
+    if (!sensitivityChartData.length) return null;
+    return {
+      data: [
+        {
+          type: "bar",
+          x: sensitivityChartData.map((row) => row.feature),
+          y: sensitivityChartData.map((row) => row["AUC drop"]),
+          name: "AUC drop",
+          marker: { color: "oklch(0.6 0.16 260)" },
+        },
+      ],
+      layout: {
+        margin: { l: 40, r: 20, t: 20, b: 60 },
+        xaxis: { tickfont: { size: 9 }, automargin: true, tickangle: -30 },
+        yaxis: { title: { text: "AUC drop" }, tickfont: { size: 11 }, automargin: true },
+        height: 256,
+      },
+    };
+  }, [sensitivityChartData]);
+
   const macroChartData = useMemo(() => {
     const scenarios = report?.macro_scenarios?.scenarios ?? [];
     return scenarios.map((s: any) => ({
@@ -327,7 +353,7 @@ function Stress() {
           <h3 className="text-sm font-semibold">Sensitivity — AUC drop on feature removal</h3>
           <p className="text-xs text-muted-foreground">From Stage 3 ablation. SS1/23 P4.3.</p>
           <div className="mt-4 h-64">
-            {report?.sensitivity?.available ? (
+            {sensitivityFigure ? (
               <PlotlyChart figure={sensitivityFigure} style={{ height: "100%" }} />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">

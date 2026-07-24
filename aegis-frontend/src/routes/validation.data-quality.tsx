@@ -106,6 +106,12 @@ function DataQuality() {
 
   const datasetLoaded = Boolean(file || profile?.csv_text || profile?.dataset_name);
 
+  // Tracks which sub-tab is active so the bottom button can tell whether
+  // the reviewer is still on the first sub-tab (Data Validation — button
+  // just advances to the second sub-tab) or the last one (Conceptual
+  // Soundness — button actually navigates to Stage 3).
+  const [activeTab, setActiveTab] = useState<string>("data-validation");
+
   // ── Profile (charts: missing values, distribution, leakage) — unrelated to
   // the RAG check pipeline, kept as its own call against /data/profile. Shared
   // by both sub-tabs below (both threshold-detail panels use it for the
@@ -374,7 +380,7 @@ function DataQuality() {
           </p>
         </div>
       ) : (
-        <Tabs defaultValue="data-validation" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList>
             <TabsTrigger value="data-validation">Data Validation</TabsTrigger>
             <TabsTrigger value="conceptual">Conceptual Soundness</TabsTrigger>
@@ -579,13 +585,24 @@ function DataQuality() {
       )}
 
       <div className="text-right">
-        <Link
-          to="/validation/challenger"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
-        >
-          Continue to Stage 3
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+        {activeTab === "data-validation" ? (
+          <button
+            type="button"
+            onClick={() => setActiveTab("conceptual")}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          >
+            Continue
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        ) : (
+          <Link
+            to="/validation/challenger"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          >
+            Continue to Stage 3
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        )}
       </div>
     </div>
   );
