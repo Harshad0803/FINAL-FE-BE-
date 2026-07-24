@@ -7,6 +7,7 @@ for JSON serialization.
 """
 from __future__ import annotations
 
+import copy as _copy
 import re as _re
 import time
 import traceback
