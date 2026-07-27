@@ -359,7 +359,13 @@ def run_backtesting(
 
         y_arr = np.array(y_test)
         yp_arr = np.array(y_proba)
-        dates = df_dates[resolved_date_col].iloc[-len(y_arr):]
+        # y_test keeps the original dataframe's row index (a random test
+        # split, not the tail of the dataset), so dates must be looked up
+        # by that index — .iloc[-len(y_arr):] previously grabbed whichever
+        # rows happened to be last in val_df, misaligning every date with
+        # the wrong prediction/actual pair and skewing the whole chart
+        # toward whatever period those unrelated rows fell in.
+        dates = df_dates[resolved_date_col].reindex(y_test.index)
 
         bt_df = pd.DataFrame({
             "date": dates.values,
