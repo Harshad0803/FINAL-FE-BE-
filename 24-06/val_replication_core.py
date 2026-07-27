@@ -321,6 +321,7 @@ def run_replication(
     seeds: List[int],
     use_feature_engineering: bool = False,
     model_params: Optional[Dict[str, Any]] = None,
+    compute_seed_stability: bool = True,
 ) -> Dict[str, Any]:
     # Wraps the original _run_replication but returns JSON-serializable outputs
     out = {
@@ -393,45 +394,53 @@ def run_replication(
         })
 
         seed_aucs = []
-        for s in seeds:
-            try:
-                Xtr_s, Xv_s, Xte_s, ytr_s, yv_s, yte_s = split_data(
-                    X, y,
-                    test_size=test_size,
-                    val_size=val_size,
-                    task_type=task_type,
-                    random_state=s,
-                )
-                if use_feature_engineering:
-                    fe_plan_s = analyze_for_feature_engineering(
-                        Xtr_s, ytr_s, col_types, task_type
+        # Seed-stability re-training is only consumed by the Replication
+        # tab's own report (seed_aucs/cv_mean_auc) — the Stress & Backtesting
+        # endpoints reuse this function purely for the fitted pipeline +
+        # ablation and never read seed_aucs, so they pass
+        # compute_seed_stability=False to skip these `len(seeds)` extra full
+        # model trainings (previously run and thrown away on every stress
+        # suite request, which is why that page was slow).
+        if compute_seed_stability:
+            for s in seeds:
+                try:
+                    Xtr_s, Xv_s, Xte_s, ytr_s, yv_s, yte_s = split_data(
+                        X, y,
+                        test_size=test_size,
+                        val_size=val_size,
+                        task_type=task_type,
+                        random_state=s,
                     )
-                    Xtr_fe_s, _ = apply_feature_engineering(Xtr_s, fe_plan_s)
-                    Xte_fe_s, _ = apply_feature_engineering(Xte_s, fe_plan_s)
+                    if use_feature_engineering:
+                        fe_plan_s = analyze_for_feature_engineering(
+                            Xtr_s, ytr_s, col_types, task_type
+                        )
+                        Xtr_fe_s, _ = apply_feature_engineering(Xtr_s, fe_plan_s)
+                        Xte_fe_s, _ = apply_feature_engineering(Xte_s, fe_plan_s)
 
-                    live_s = set(Xtr_fe_s.columns)
-                    prep_report_s = _copy.deepcopy(prep_report)
-                    prep_report_s["numeric"] = {c: v for c, v in prep_report.get("numeric", {}).items() if c in live_s}
-                    prep_report_s["categorical"] = {c: v for c, v in prep_report.get("categorical", {}).items() if c in live_s}
-                else:
-                    Xtr_fe_s, Xte_fe_s = Xtr_s, Xte_s
-                    prep_report_s = prep_report
+                        live_s = set(Xtr_fe_s.columns)
+                        prep_report_s = _copy.deepcopy(prep_report)
+                        prep_report_s["numeric"] = {c: v for c, v in prep_report.get("numeric", {}).items() if c in live_s}
+                        prep_report_s["categorical"] = {c: v for c, v in prep_report.get("categorical", {}).items() if c in live_s}
+                    else:
+                        Xtr_fe_s, Xte_fe_s = Xtr_s, Xte_s
+                        prep_report_s = prep_report
 
-                m_s = model_cls(**default_params)
-                pipe_s, _, _ = train_model(
-                    Xtr_fe_s, ytr_s,
-                    col_types=col_types,
-                    target_col=target_col,
-                    prep_report=prep_report_s,
-                    model=m_s,
-                    use_cv=False,
-                    task_type=task_type,
-                )
-                proba_s = _proba_1d(pipe_s, Xte_fe_s)
-                if proba_s is not None:
-                    seed_aucs.append(round(float(roc_auc_score(yte_s.values, proba_s)), 4))
-            except Exception:
-                pass
+                    m_s = model_cls(**default_params)
+                    pipe_s, _, _ = train_model(
+                        Xtr_fe_s, ytr_s,
+                        col_types=col_types,
+                        target_col=target_col,
+                        prep_report=prep_report_s,
+                        model=m_s,
+                        use_cv=False,
+                        task_type=task_type,
+                    )
+                    proba_s = _proba_1d(pipe_s, Xte_fe_s)
+                    if proba_s is not None:
+                        seed_aucs.append(round(float(roc_auc_score(yte_s.values, proba_s)), 4))
+                except Exception:
+                    pass
         out["seed_aucs"] = seed_aucs
 
         feat_cols = list(X_test_eng.columns)

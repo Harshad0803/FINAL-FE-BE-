@@ -3282,6 +3282,7 @@ async def validation_stress_run(
         cv_folds=cv_folds,
         reported={},
         seeds=seed_list,
+        compute_seed_stability=False,
     )
 
     suite = run_stress_suite(rep_result, val_df=df, freq_key=freq or "quarterly", date_col=date_col)
@@ -3334,6 +3335,7 @@ async def validation_stress_shock(
         cv_folds=cv_folds,
         reported={},
         seeds=seed_list,
+        compute_seed_stability=False,
     )
 
     try:

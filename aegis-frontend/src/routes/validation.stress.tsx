@@ -153,11 +153,15 @@ function Stress() {
     void runStressSuite();
   }, [datasetReady, targetCol, algorithm]);
 
-  useEffect(() => {
-    if (!hasAutoRun.current) return;
-    void runStressSuite();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [freq]);
+  // Backtesting only re-buckets already-computed predictions by calendar
+  // period — it needs no retraining — so the backend now returns every
+  // frequency's periods up front in backtest_by_freq. Switching the
+  // dropdown reads from that instantly instead of re-running the whole
+  // (expensive: retrains the model + full ablation sweep from scratch)
+  // stress suite just to re-bucket the same numbers.
+  const activeBacktest = useMemo(() => {
+    return report?.backtest_by_freq?.[freq] ?? report?.backtest ?? null;
+  }, [report, freq]);
 
 
   const applyShock = async () => {
@@ -278,13 +282,13 @@ function Stress() {
   }, [macroChartData]);
 
   const backtestChartData = useMemo(() => {
-    const periods = report?.backtest?.periods ?? [];
+    const periods = activeBacktest?.periods ?? [];
     return periods.map((p: any) => ({
       period: p.period,
       "Actual default rate": +(p.actual_dr * 100).toFixed(2),
       "Avg predicted PD": +(p.avg_pred_pd * 100).toFixed(2),
     }));
-  }, [report]);
+  }, [activeBacktest]);
 
   const backtestFigure = useMemo(() => {
     if (!backtestChartData.length) return null;
@@ -316,7 +320,25 @@ function Stress() {
     };
   }, [backtestChartData]);
 
-  const summary = report?.summary;
+  // report.summary's pass/warn/fail counts were computed server-side using
+  // whichever freq was active at run time. Since the freq dropdown now
+  // swaps activeBacktest client-side without re-running the suite, the
+  // backtest check within the summary is recomputed here too so switching
+  // "Backtest period grouping" doesn't leave stale counts/tiles behind.
+  const summary = useMemo(() => {
+    if (!report?.summary) return report?.summary;
+    const otherChecks = (report.summary.checks ?? []).filter((c: any) => c.id !== activeBacktest?.check?.id);
+    const checks = activeBacktest?.check ? [...otherChecks, activeBacktest.check] : otherChecks;
+    const directionalCount = (status: string) => report.summary[status] - (report.summary.checks ?? []).filter((c: any) => c.status === status.toUpperCase()).length;
+    return {
+      ...report.summary,
+      checks,
+      pass: checks.filter((c: any) => c.status === "PASS").length + directionalCount("pass"),
+      warn: checks.filter((c: any) => c.status === "WARN").length + directionalCount("warn"),
+      fail: checks.filter((c: any) => c.status === "FAIL").length + directionalCount("fail"),
+      pending: checks.filter((c: any) => c.status === "PENDING").length,
+    };
+  }, [report, activeBacktest]);
 
   return (
     <div className="space-y-8">
@@ -468,9 +490,9 @@ function Stress() {
           <div>
             <h3 className="text-sm font-semibold">Backtesting — predicted vs actual default rate</h3>
             <p className="text-xs text-muted-foreground">
-              {report?.backtest?.available
-                ? `Grouped by ${report.backtest.freq} · date column: ${report.backtest.date_col}`
-                : report?.backtest?.reason ?? "Run the stress suite to see backtesting results."}
+              {activeBacktest?.available
+                ? `Grouped by ${activeBacktest.freq} · date column: ${activeBacktest.date_col}`
+                : activeBacktest?.reason ?? "Run the stress suite to see backtesting results."}
             </p>
           </div>
           <div>
@@ -478,7 +500,6 @@ function Stress() {
             <select
               className="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm"
               value={freq}
-              disabled={running}
               onChange={(e) => setFreq(e.target.value)}
             >
               {FREQ_OPTIONS.map((f) => (
@@ -494,7 +515,7 @@ function Stress() {
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No backtesting data yet.</div>
           )}
         </div>
-        {report?.backtest?.check ? <div className="mt-4"><CheckCard check={report.backtest.check} /></div> : null}
+        {activeBacktest?.check ? <div className="mt-4"><CheckCard check={activeBacktest.check} /></div> : null}
       </section>
 
       <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">

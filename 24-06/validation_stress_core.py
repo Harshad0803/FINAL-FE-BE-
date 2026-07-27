@@ -481,7 +481,17 @@ def run_stress_suite(rep_result: dict, val_df: Optional[pd.DataFrame], freq_key:
 
     sensitivity = get_ablation_sensitivity(ablation)
     macro = run_all_macro_scenarios(pipeline, X_test, y_proba)
-    backtest = run_backtesting(val_df, y_test, y_proba, freq_key=freq_key, date_col=date_col)
+    # Backtesting only re-buckets the already-computed y_test/y_proba by
+    # calendar period — it needs no retraining — so every frequency option
+    # is computed here in one pass. The frontend can then switch the
+    # "Backtest period grouping" dropdown instantly from backtest_by_freq
+    # instead of re-running the whole (expensive, retrains-from-scratch)
+    # stress suite just to re-bucket the same predictions.
+    backtest_by_freq = {
+        key: run_backtesting(val_df, y_test, y_proba, freq_key=key, date_col=date_col)
+        for key in FREQ_MAP
+    }
+    backtest = backtest_by_freq.get(freq_key) or run_backtesting(val_df, y_test, y_proba, freq_key=freq_key, date_col=date_col)
     psi = compute_psi_stability(pipeline, X_train, y_proba) if X_train is not None else {
         "psi_total": None, "bins": [],
         "check": {"id": "6.4", "title": "Score Distribution Stability (PSI)", "status": "PENDING",
@@ -507,6 +517,7 @@ def run_stress_suite(rep_result: dict, val_df: Optional[pd.DataFrame], freq_key:
         "sensitivity": sensitivity,
         "macro_scenarios": macro,
         "backtest": backtest,
+        "backtest_by_freq": backtest_by_freq,
         "psi": psi,
         "directional": directional,
         "summary": {
