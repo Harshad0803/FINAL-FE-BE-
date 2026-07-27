@@ -69,6 +69,7 @@ type IntakeResponse = {
     model_tier?: string;
     model_purpose?: string;
     mdd_text?: string;
+    frameworks?: string[];
   };
   val_mdd_reported_metrics?: Record<string, any>;
   chk_inventory?: boolean;
@@ -174,6 +175,7 @@ function Intake() {
   const [tier, setTier] = useState("Tier 2 — Medium Risk");
   const [version, setVersion] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [frameworks, setFrameworks] = useState<string[]>(["IFRS9", "SS1/23", "RBI"]);
   const [demoMode, setDemoMode] = useState<string | null>(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [demoError, setDemoError] = useState<string | null>(null);
@@ -181,6 +183,12 @@ function Intake() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [proceedError, setProceedError] = useState<string | null>(null);
+
+  const toggleFramework = (fw: string) => {
+    setFrameworks((prev) =>
+      prev.includes(fw) ? prev.filter((f) => f !== fw) : [...prev, fw]
+    );
+  };
 
   // Artifacts state
   const [datasetFile, setDatasetFile] = useState<File | null>(null);
@@ -234,6 +242,7 @@ function Intake() {
         setTier(s.tier ?? "Tier 2 — Medium Risk");
         setVersion(s.version ?? "");
         setPurpose(s.purpose ?? "");
+        setFrameworks(Array.isArray(s.frameworks) && s.frameworks.length > 0 ? s.frameworks : ["IFRS9", "SS1/23", "RBI"]);
         setDemoMode(s.demoMode ?? null);
         setMddFileName(s.mddFileName ?? null);
         setMddText(s.mddText ?? null);
@@ -263,7 +272,7 @@ function Intake() {
   useEffect(() => {
     if (typeof window === "undefined" || !isRestored) return;
     const snapshot = {
-      intake, intakeLoaded, modelName, owningTeam, modelOwner, leadValidator, modelType, tier, version, purpose,
+      intake, intakeLoaded, modelName, owningTeam, modelOwner, leadValidator, modelType, tier, version, purpose, frameworks,
       demoMode, mddFileName, mddText, mddMetrics, trainingCodeFileName, perfFileName, profileFileName,
       assumptionsFileName, hyperparamsFileName, chkInventory, chkTier, chkArtifacts, chkPrevFindings, chkRegScope,
       chkIndependence, chkPlanApproved, chkAttestation,
@@ -301,6 +310,18 @@ function Intake() {
       return;
     }
     setProceedError(null);
+    setValidationIntakeData({
+      model_name: modelName,
+      owning_team: owningTeam,
+      model_owner: modelOwner,
+      lead_validator: leadValidator,
+      model_type: modelType,
+      model_tier: tier,
+      model_version: version,
+      model_purpose: purpose,
+      mdd_text: mddText ?? null,
+      frameworks,
+    });
     navigate({ to: intake.nextStep.path });
   };
 
@@ -420,8 +441,16 @@ function Intake() {
       setIntakeLoaded(true);
       const snapshot = response.val_intake_data;
       if (snapshot) {
-        const intakeSnapshot = { ...snapshot, mdd_text: snapshot.mdd_text ?? null };
+        const selectedFrameworks = Array.isArray(snapshot.frameworks) && snapshot.frameworks.length > 0
+          ? snapshot.frameworks
+          : frameworks;
+        const intakeSnapshot = {
+          ...snapshot,
+          mdd_text: snapshot.mdd_text ?? null,
+          frameworks: selectedFrameworks,
+        };
         setValidationIntakeData(intakeSnapshot);
+        setFrameworks(selectedFrameworks);
         setModelName(snapshot.model_name ?? "");
         setOwningTeam(snapshot.owning_team ?? "");
         setModelOwner(snapshot.model_owner ?? "");
@@ -836,7 +865,25 @@ function Intake() {
       </section>
 
       <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div>
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-2 text-sm font-medium">Applicable Regulatory Frameworks</div>
+          {[
+            { key: "IFRS9", label: "IFRS 9" },
+            { key: "SS1/23", label: "SS1/23" },
+            { key: "RBI", label: "RBI Model Risk Management" },
+          ].map((fw) => (
+            <label key={fw.key} className="flex items-center gap-2 py-1 text-sm">
+              <input
+                type="checkbox"
+                checked={frameworks.includes(fw.key)}
+                onChange={() => toggleFramework(fw.key)}
+              />
+              {fw.label}
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-5">
           <h3 className="text-sm font-semibold text-foreground">{intake.governance.title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">{intake.governance.description}</p>
         </div>

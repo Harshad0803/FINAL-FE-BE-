@@ -23,6 +23,31 @@ from llm_providers import LLMProviderError, complete_with_fallback
 # application code — see check_documents_with_llm() below.
 _LLM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "conceptual_validation_prompt.txt"
 
+_FRAMEWORK_ALIASES = {
+    "IFRS9": ["ifrs 9", "ifrs9"],
+    "SS1/23": ["ss1/23"],
+    "RBI": ["rbi", "chapter iv", "regulatory principles for model risk management"],
+}
+
+
+def _rule_matches_frameworks(rule: dict, frameworks: list[str] | None) -> bool:
+    """Return True if a rule's source/principle matches any selected framework.
+    Checks both `source` and `principle` fields (not just `source`) because
+    _infer_source() currently mislabels some RBI rules as IFRS9 — matching on
+    principle text (e.g. "Chapter IV Section 26(1)" vs "B5.5.28") avoids that
+    bug without touching the classifier itself, per explicit instruction not
+    to fix _infer_source().
+    """
+    if not frameworks:
+        return True
+    source = str(rule.get("source", "")).lower()
+    principle = str(rule.get("principle", "")).lower()
+    for fw in frameworks:
+        aliases = _FRAMEWORK_ALIASES.get(fw, [fw.lower()])
+        if any(alias in source or alias in principle for alias in aliases):
+            return True
+    return False
+
 
 class Agent2:
     def __init__(self, rules_path: str = "rag_store/val_mdd_rules.json"):
@@ -69,7 +94,7 @@ class Agent2:
 
     # ── Quantitative validation checks ───────────────────────────────────────
 
-    def check_for_validation(self, stage: str, context_dict: dict) -> list[dict]:
+    def check_for_validation(self, stage: str, context_dict: dict, frameworks: list[str] | None = None) -> list[dict]:
         """
         Evaluate machine-testable rules (checkable_against_data=True) for a
         model-validation stage against supplied dataset metrics.
@@ -80,6 +105,8 @@ class Agent2:
         findings: list[dict] = []
         for rule in self.rules:
             if rule.get("stage") not in (stage, self._map_stage(stage)):
+                continue
+            if not _rule_matches_frameworks(rule, frameworks):
                 continue
             if not rule.get("checkable_against_data", False):
                 continue
@@ -117,6 +144,7 @@ class Agent2:
         self,
         mdd_text: str,
         stage: str | None = None,
+        frameworks: list[str] | None = None,
     ) -> list[dict]:
         """
         Keyword-search the uploaded MDD text against each rule's `keywords` list.
@@ -140,6 +168,9 @@ class Agent2:
                 rule_stage = rule.get("stage", "")
                 if rule_stage not in (stage, self._map_stage(stage)):
                     continue
+
+            if not _rule_matches_frameworks(rule, frameworks):
+                continue
 
             # Skip machine-testable rules — those go through check_for_validation
             if rule.get("checkable_against_data", False):
@@ -191,6 +222,7 @@ class Agent2:
         docs: dict[str, str],
         stage: str | None = None,
         only_rule_ids: list[str] | None = None,
+        frameworks: list[str] | None = None,
     ) -> list[dict]:
         """
         LLM-based conceptual/qualitative rule check.
@@ -220,6 +252,8 @@ class Agent2:
                 rule_stage = rule.get("stage", "")
                 if rule_stage not in (stage, self._map_stage(stage)):
                     continue
+            if not _rule_matches_frameworks(rule, frameworks):
+                continue
             rule_id = rule.get("id", rule.get("check", "?"))
             if only_rule_ids and str(rule_id) not in only_rule_ids:
                 continue

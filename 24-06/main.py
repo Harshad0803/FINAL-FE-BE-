@@ -134,6 +134,7 @@ if _source_agent2_spec is None or _source_agent2_spec.loader is None:
 _source_agent2_module = importlib.util.module_from_spec(_source_agent2_spec)
 _source_agent2_spec.loader.exec_module(_source_agent2_module)
 SourceAgent2 = _source_agent2_module.Agent2
+_rule_matches_frameworks = _source_agent2_module._rule_matches_frameworks
 
 
 app = FastAPI()
@@ -3462,7 +3463,7 @@ def _derive_feature_importance_payload(report: dict, df=None, model_file: Option
     }
 
 
-def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None) -> dict:
+def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None, selected_frameworks: Optional[List[str]] = None) -> dict:
     """Map ValidationAgent2 + Agent2 RAG results into the Stage 2 UI payload.
 
     Mirrors _group_stage3 exactly, but for "Stage 2: Data Validation":
@@ -3515,9 +3516,13 @@ def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None) -> dic
     if not remediation_items:
         remediation_items.append("No material remediation required at this stage.")
 
+    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "SS1/23": "SS1/23", "RBI": "RBI Model Risk Management"}
     regulatory_references = sorted({f.get("source") for f in combined if f.get("source")})
     if not regulatory_references:
-        regulatory_references = ["IFRS 9", "SS11/13", "SS1/23"]
+        if selected_frameworks:
+            regulatory_references = [_FRAMEWORK_DISPLAY.get(fw, fw) for fw in selected_frameworks]
+        else:
+            regulatory_references = ["IFRS 9", "SS11/13", "SS1/23"]
 
     regulatory = {
         "verdict": stage2_verdict,
@@ -3594,7 +3599,7 @@ def _normalize_rag_rule(r: dict) -> dict:
     }
 
 
-def _group_stage3(report: dict, rag_results: Optional[List[dict]] = None, df=None, model_file: Optional[UploadFile] = None, intake: Optional[dict] = None, mdd_text: str = "") -> dict:
+def _group_stage3(report: dict, rag_results: Optional[List[dict]] = None, df=None, model_file: Optional[UploadFile] = None, intake: Optional[dict] = None, mdd_text: str = "", selected_frameworks: Optional[List[str]] = None) -> dict:
     """Map ValidationAgent2 + Agent2 RAG results into the Stage 3 UI payload.
 
     Returns a dict with keys: thresholdChecks, ragRules, summary, regulatoryAlignment,
@@ -3643,9 +3648,13 @@ def _group_stage3(report: dict, rag_results: Optional[List[dict]] = None, df=Non
     if not remediation_items:
         remediation_items.append("No material remediation required at this stage.")
 
+    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "SS1/23": "SS1/23", "RBI": "RBI Model Risk Management"}
     regulatory_references = sorted({f.get("source") for f in combined if f.get("source")})
     if not regulatory_references:
-        regulatory_references = ["SS1/23", "SS11/13"]
+        if selected_frameworks:
+            regulatory_references = [_FRAMEWORK_DISPLAY.get(fw, fw) for fw in selected_frameworks]
+        else:
+            regulatory_references = ["SS1/23", "SS11/13"]
 
     regulatory = {
         "verdict": stage3_verdict,
@@ -3710,6 +3719,8 @@ async def validation_stage2_run(
         except Exception:
             intake = {}
 
+    selected_frameworks = intake.get("frameworks") if isinstance(intake, dict) else None
+
     mdd_text = ""
     if mdd_file is not None:
         try:
@@ -3726,7 +3737,7 @@ async def validation_stage2_run(
     source_agent = _load_source_agent2()
     if source_agent is not None:
         try:
-            rag_results.extend(source_agent.check_for_validation("data_validation", {}))
+            rag_results.extend(source_agent.check_for_validation("data_validation", {}, frameworks=selected_frameworks))
         except Exception:
             pass
 
@@ -3739,11 +3750,11 @@ async def validation_stage2_run(
         # LLM verdicts are fetched afterward by the frontend via
         # /validation/stage2/llm-check (see mapped["llm_pending"] below).
         try:
-            rag_results.extend(source_agent.check_documents_with_llm({}, stage="data_validation"))
+            rag_results.extend(source_agent.check_documents_with_llm({}, stage="data_validation", frameworks=selected_frameworks))
         except Exception:
             pass
 
-    mapped = _group_stage2(report, rag_results=rag_results)
+    mapped = _group_stage2(report, rag_results=rag_results, selected_frameworks=selected_frameworks)
     mapped["llm_ran"] = False
     # True when there's MDD text for the frontend to send to
     # /validation/stage2/llm-check as a fast follow-up call.
@@ -3777,6 +3788,8 @@ async def validation_stage3_run(
             intake = json.loads(intake_json)
         except Exception:
             intake = {}
+
+    selected_frameworks = intake.get("frameworks") if isinstance(intake, dict) else None
 
     mdd_text = ""
     if mdd_file is not None:
@@ -3818,7 +3831,7 @@ async def validation_stage3_run(
         try:
             rag_results.extend(source_agent.check_for_validation("conceptual_soundness", {
                 "correlation_max": corr_max,
-            }))
+            }, frameworks=selected_frameworks))
         except Exception:
             pass
 
@@ -3831,11 +3844,11 @@ async def validation_stage3_run(
         # frontend via /validation/stage3/llm-check (see
         # mapped["llm_pending"] below).
         try:
-            rag_results.extend(source_agent.check_documents_with_llm({}, stage="conceptual_soundness"))
+            rag_results.extend(source_agent.check_documents_with_llm({}, stage="conceptual_soundness", frameworks=selected_frameworks))
         except Exception:
             pass
 
-    mapped = _group_stage3(report, rag_results=rag_results, df=df, model_file=model_file, intake=intake, mdd_text=mdd_text)
+    mapped = _group_stage3(report, rag_results=rag_results, df=df, model_file=model_file, intake=intake, mdd_text=mdd_text, selected_frameworks=selected_frameworks)
     # add top-level metadata
     mapped["llm_ran"] = False
     # True when there's MDD text for the frontend to send to
@@ -3857,6 +3870,10 @@ async def validation_stage7_run(
     checks against the MDD text and intake_json (not RAG-based, unlike Stage 3).
     Reuses ValidationAgent2.check_regulatory_compliance() via run_all_checks(),
     same pattern as /validation/stage3/run.
+
+    If the user selected specific regulatory frameworks on Stage 1, findings
+    are filtered post-hoc by their `source`/`principle` fields before being
+    normalized for the frontend.
     """
     intake = {}
     if intake_json:
@@ -3864,6 +3881,8 @@ async def validation_stage7_run(
             intake = json.loads(intake_json)
         except Exception:
             intake = {}
+
+    selected_frameworks = intake.get("frameworks") if isinstance(intake, dict) else None
 
     mdd_text = ""
     if mdd_file is not None:
@@ -3874,6 +3893,10 @@ async def validation_stage7_run(
 
     report = run_validation_agent2(None, intake, mdd_text)
     findings = report.get("findings_by_stage", {}).get("Stage 7: Regulatory Compliance", [])
+
+    if selected_frameworks:
+        findings = [f for f in findings if _rule_matches_frameworks(f, selected_frameworks)]
+
     checks = [_normalize_threshold_check(f) for f in findings]
 
     summary = {
@@ -3881,9 +3904,6 @@ async def validation_stage7_run(
         "pass": sum(1 for c in checks if c.get("status") == "PASS"),
         "warn": sum(1 for c in checks if c.get("status") == "WARN"),
         "fail": sum(1 for c in checks if c.get("status") == "FAIL"),
-        # Anything _normalize_threshold_check doesn't map to PASS/WARN/FAIL
-        # lands here so total always equals pass+warn+fail+na (see the
-        # identical bucket in _group_stage2/_group_stage3).
         "na": sum(1 for c in checks if c.get("status") not in ("PASS", "WARN", "FAIL")),
     }
 
@@ -4195,6 +4215,8 @@ async def validation_stage3_llm(
         except Exception:
             intake = {}
 
+    selected_frameworks = intake.get("frameworks") if isinstance(intake, dict) else None
+
     mdd_text = ""
     if mdd_file is not None:
         try:
@@ -4214,7 +4236,12 @@ async def validation_stage3_llm(
         only_ids = [s.strip() for s in only_rule_ids.split(",") if s.strip()]
 
     try:
-        llm_results = agent.check_documents_with_llm(docs, stage="conceptual_soundness", only_rule_ids=only_ids)
+        llm_results = agent.check_documents_with_llm(
+            docs,
+            stage="conceptual_soundness",
+            only_rule_ids=only_ids,
+            frameworks=selected_frameworks,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM deep-check failed: {e}")
 
