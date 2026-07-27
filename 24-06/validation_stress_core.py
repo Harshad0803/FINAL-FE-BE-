@@ -359,7 +359,13 @@ def run_backtesting(
 
         y_arr = np.array(y_test)
         yp_arr = np.array(y_proba)
-        dates = df_dates[resolved_date_col].iloc[-len(y_arr):]
+        # y_test keeps the original dataframe's row index (a random test
+        # split, not the tail of the dataset), so dates must be looked up
+        # by that index — .iloc[-len(y_arr):] previously grabbed whichever
+        # rows happened to be last in val_df, misaligning every date with
+        # the wrong prediction/actual pair and skewing the whole chart
+        # toward whatever period those unrelated rows fell in.
+        dates = df_dates[resolved_date_col].reindex(y_test.index)
 
         bt_df = pd.DataFrame({
             "date": dates.values,
@@ -475,7 +481,17 @@ def run_stress_suite(rep_result: dict, val_df: Optional[pd.DataFrame], freq_key:
 
     sensitivity = get_ablation_sensitivity(ablation)
     macro = run_all_macro_scenarios(pipeline, X_test, y_proba)
-    backtest = run_backtesting(val_df, y_test, y_proba, freq_key=freq_key, date_col=date_col)
+    # Backtesting only re-buckets the already-computed y_test/y_proba by
+    # calendar period — it needs no retraining — so every frequency option
+    # is computed here in one pass. The frontend can then switch the
+    # "Backtest period grouping" dropdown instantly from backtest_by_freq
+    # instead of re-running the whole (expensive, retrains-from-scratch)
+    # stress suite just to re-bucket the same predictions.
+    backtest_by_freq = {
+        key: run_backtesting(val_df, y_test, y_proba, freq_key=key, date_col=date_col)
+        for key in FREQ_MAP
+    }
+    backtest = backtest_by_freq.get(freq_key) or run_backtesting(val_df, y_test, y_proba, freq_key=freq_key, date_col=date_col)
     psi = compute_psi_stability(pipeline, X_train, y_proba) if X_train is not None else {
         "psi_total": None, "bins": [],
         "check": {"id": "6.4", "title": "Score Distribution Stability (PSI)", "status": "PENDING",
@@ -501,6 +517,7 @@ def run_stress_suite(rep_result: dict, val_df: Optional[pd.DataFrame], freq_key:
         "sensitivity": sensitivity,
         "macro_scenarios": macro,
         "backtest": backtest,
+        "backtest_by_freq": backtest_by_freq,
         "psi": psi,
         "directional": directional,
         "summary": {

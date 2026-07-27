@@ -1,7 +1,7 @@
 import React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageHeader } from "@/components/app-shell";
-import { ArrowRight, AlertCircle, Loader2, PlayCircle } from "lucide-react";
+import { ArrowRight, AlertCircle, Loader2, PlayCircle, Upload } from "lucide-react";
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { ApiError, formUpload } from "@/lib/api";
@@ -22,6 +22,11 @@ type PerformanceResponse = {
   stage: string;
   report: {
     metrics: Record<string, any>;
+    // The re-fit replica's own computed metrics, kept for transparency —
+    // NOT what's shown as the champion's reported performance (that's
+    // `metrics`, sourced from the MDD). Useful if you need to sanity-check
+    // how far a fresh replica diverges from the documented champion.
+    replica_metrics?: Record<string, any>;
     roc_curve: { points: Array<Record<string, number>>; auc?: number | null };
     benchmark?: Record<string, any>;
   };
@@ -78,13 +83,46 @@ function Performance() {
   const [comparisonError, setComparisonError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Whether the reviewer has actually run "Compare Challengers" and clicked
+  // "Select" on a row this session. The champion-vs-challenger benchmark
+  // must not run against a guessed/default challenger — it can only run
+  // once a challenger has been deliberately picked from real comparison
+  // numbers.
+  const [challengerPicked, setChallengerPicked] = React.useState(false);
+  // Champion performance metrics come from the MDD that was uploaded and
+  // parsed back in Stage 1 (Intake & Governance) — ds.validationMddMetrics
+  // is populated there via POST /validation/parse-mdd and is exactly the
+  // extract_metrics_from_mdd() output the benchmarking endpoint expects, so
+  // it can be sent straight through as reported_json. No re-upload needed
+  // here for the common case.
+  const mddMetricsFromIntake = ds.validationMddMetrics;
+  const hasMddMetrics = Boolean(mddMetricsFromIntake && Object.keys(mddMetricsFromIntake).length > 0);
+  // Fallback only: lets a reviewer parse an MDD directly from this page if
+  // Stage 1 was skipped or didn't have one yet. Writes back into the same
+  // shared context (mirrors Stage 1's own upload handler) so it becomes the
+  // one shared source of truth for every stage, not a page-local copy.
+  const [mddParseError, setMddParseError] = React.useState<string | null>(null);
+  const [mddParsing, setMddParsing] = React.useState(false);
   // Seed from shared context so returning to this page (e.g. via Back from
   // Stage 5) shows the already-computed result instead of resetting to the
-  // bare input form — payload previously lived only in this local state and
-  // was lost on every remount.
-  const [payload, setPayload] = React.useState<PerformanceResponse | null>(
-    (ds.validationStage5Result as PerformanceResponse | null) ?? null,
+  // bare input form — but ONLY if that cached result reflects a benchmark
+  // that was actually run against a deliberately-picked challenger, not
+  // just whatever happened to be sitting in shared state (e.g. left over
+  // from an earlier dataset or an earlier visit). Previously this seeded
+  // unconditionally, which is why the champion-vs-challenger comparison
+  // could appear pre-loaded the moment the tab opened, before Compare
+  // Challengers had ever been run.
+  const cachedResult = ds.validationStage5Result as PerformanceResponse | null;
+  const cachedIsUsable = Boolean(
+    cachedResult?.report?.benchmark?.model_name && cachedResult?.report?.benchmark?.status === "OK",
   );
+  const [payload, setPayload] = React.useState<PerformanceResponse | null>(
+    cachedIsUsable ? cachedResult : null,
+  );
+  React.useEffect(() => {
+    if (cachedIsUsable) setChallengerPicked(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const datasetName = ds.file?.name ?? ds.profile?.dataset_name ?? "uploaded dataset";
   const datasetReady = Boolean(ds.file || ds.profile?.csv_text || ds.profile?.dataset_name);
@@ -119,6 +157,10 @@ function Performance() {
       setError("Model name is required.");
       return;
     }
+    if (!hasMddMetrics) {
+      setError("No MDD metrics found. Upload the MDD in Stage 1 (Intake & Governance), or use the fallback parser below — champion metrics are sourced from it, not from a re-fit replica.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -129,6 +171,7 @@ function Performance() {
       form.append("model_name", modelName.trim());
       form.append("target_col", targetCol.trim());
       form.append("challenger_model_name", challengerModelName.trim());
+      form.append("reported_json", JSON.stringify(mddMetricsFromIntake));
       const res = await formUpload<PerformanceResponse>("/validation/performance", form);
       setPayload(res);
       ds.setValidationStage5Result(res as unknown as Record<string, any>);
@@ -146,22 +189,17 @@ function Performance() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetFile, targetCol, modelName, challengerModelName]);
+  }, [datasetFile, targetCol, modelName, challengerModelName, hasMddMetrics, mddMetricsFromIntake]);
 
-  // Auto-run once the shared dataset from Intake/Data Upload is available,
-  // same as Stage 2 — the reviewer shouldn't have to manually
-  // re-upload a file that's already sitting in context just to see Stage 4
-  // results. Skipped if we already restored a cached result from context
-  // (Back/Forward nav) or the reviewer already ran it locally this session.
-  const autoRunAttempted = React.useRef(payload !== null);
-  React.useEffect(() => {
-    if (autoRunAttempted.current) return;
-    if (!datasetReady || !datasetFile) return;
-    if (!targetCol.trim() || !modelName.trim()) return;
-    autoRunAttempted.current = true;
-    void handleRun(datasetFile);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetReady, datasetFile, targetCol, modelName]);
+  // NOTE: Stage 4 deliberately does NOT auto-run on mount. Unlike Stage 2,
+  // this page's main result is a champion-vs-challenger comparison, and a
+  // challenger must be deliberately picked (via Compare Challengers ->
+  // Select) before there's anything meaningful to benchmark against. An
+  // earlier version auto-ran this against a hardcoded default challenger
+  // ("Logistic Regression") the instant a dataset was ready, which is why
+  // the comparison could appear already populated before the reviewer had
+  // run Compare Challengers or picked a model — see handleRun's disabled
+  // state below, which now requires challengerPicked.
 
   const toggleCandidate = React.useCallback((name: string) => {
     setSelectedCandidates((prev) =>
@@ -338,11 +376,13 @@ function Performance() {
 
       {!payload && !loading ? (
         <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-elegant">
-          Waiting on a dataset from Stage 1/Stage 2 to run the Stage 4 benchmark report.
+          {datasetReady
+            ? "Run Compare Challengers below, select a challenger model, then Run Benchmark to see the champion-vs-challenger comparison."
+            : "Waiting on a dataset from Stage 1/Stage 2 to run the Stage 4 benchmark report."}
         </div>
       ) : null}
 
-      {payload ? (
+      {datasetReady ? (
         <div className="space-y-6">
           <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
             <h3 className="text-sm font-semibold">Compare challenger models</h3>
@@ -431,7 +471,15 @@ function Performance() {
                           <td className="px-3 py-2">
                             <button
                               type="button"
-                              onClick={() => setChallengerModelName(row.model_name)}
+                              onClick={() => {
+                                setChallengerModelName(row.model_name);
+                                setChallengerPicked(true);
+                                // A newly-picked challenger invalidates any
+                                // previously-run (or cached) benchmark result
+                                // — don't let a stale comparison linger under
+                                // the newly-selected challenger's name.
+                                setPayload(null);
+                              }}
                               disabled={Boolean(row.error)}
                               className={
                                 "rounded-lg border px-3 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 " +
@@ -457,15 +505,67 @@ function Performance() {
               <div className="text-sm">
                 <span className="font-medium">Champion vs Challenger</span>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Benchmarks the champion model against{" "}
-                  <span className="font-semibold text-foreground">{challengerModelName}</span> — change the
-                  selection above and re-run to compare against a different challenger.
+                  {challengerPicked ? (
+                    <>
+                      Benchmarks the champion model against{" "}
+                      <span className="font-semibold text-foreground">{challengerModelName}</span> — pick a
+                      different row above and re-run to compare against another challenger.
+                    </>
+                  ) : (
+                    "Run Compare Challengers above and select a row before running the benchmark."
+                  )}
                 </p>
+
+                {hasMddMetrics ? (
+                  <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">Champion metrics sourced from MDD</span>{" "}
+                    (Stage 1 — Intake &amp; Governance):{" "}
+                    {Object.entries(mddMetricsFromIntake as Record<string, any>)
+                      .map(([k, v]) => `${k.replace(/_/g, " ")}=${v}`)
+                      .join(", ")}
+                  </div>
+                ) : (
+                  <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    No MDD metrics found from Stage 1 (Intake &amp; Governance). Go back and upload the MDD
+                    there, or parse one here as a fallback:
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-foreground hover:underline">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{mddParsing ? "Parsing…" : "Upload & Parse MDD"}</span>
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,.txt"
+                        className="hidden"
+                        disabled={mddParsing}
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          if (!f) return;
+                          setMddParseError(null);
+                          setMddParsing(true);
+                          try {
+                            const form = new FormData();
+                            form.append("mdd_file", f);
+                            const resp = await formUpload<Record<string, any>>("/validation/parse-mdd", form);
+                            // Write back to the same shared context Stage 1
+                            // uses, so this becomes the one source of truth
+                            // for every stage rather than a page-local copy.
+                            ds.setValidationMddText(resp?.mdd_text ?? null);
+                            ds.setValidationMddMetrics(resp?.metrics ?? null);
+                          } catch (err) {
+                            setMddParseError(err instanceof Error ? err.message : "Failed to parse MDD file.");
+                          } finally {
+                            setMddParsing(false);
+                          }
+                        }}
+                      />
+                    </label>
+                    {mddParseError ? <div className="mt-1 text-destructive">{mddParseError}</div> : null}
+                  </div>
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => handleRun()}
-                disabled={loading || !datasetFile}
+                disabled={loading || !datasetFile || !challengerPicked || !hasMddMetrics}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
@@ -474,42 +574,44 @@ function Performance() {
             </div>
           </section>
 
-          <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card title="Industry benchmark table" sub="Selected challenger benchmark versus champion model">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-2 text-left">#</th>
-                      <th className="px-3 py-2 text-left">Model</th>
-                      <th className="px-3 py-2 text-right">ROC-AUC</th>
-                      <th className="px-3 py-2 text-right">Gini</th>
-                      <th className="px-3 py-2 text-right">Recall</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {benchmarkTableRows.map((row, rowIndex) => (
-                      <tr key={row.model}>
-                        <td className="px-3 py-2 text-muted-foreground">{rowIndex + 1}</td>
-                        <td className="px-3 py-2 font-medium">{row.model}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.roc_auc, 3)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.gini, 3)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.recall, 3)}</td>
+          {payload ? (
+            <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card title="Industry benchmark table" sub="Selected challenger benchmark versus champion model">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 text-left">#</th>
+                        <th className="px-3 py-2 text-left">Model</th>
+                        <th className="px-3 py-2 text-right">ROC-AUC</th>
+                        <th className="px-3 py-2 text-right">Gini</th>
+                        <th className="px-3 py-2 text-right">Recall</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {benchmarkTableRows.map((row, rowIndex) => (
+                        <tr key={row.model}>
+                          <td className="px-3 py-2 text-muted-foreground">{rowIndex + 1}</td>
+                          <td className="px-3 py-2 font-medium">{row.model}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.roc_auc, 3)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.gini, 3)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.recall, 3)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
 
-            <Card title="Champion vs Challenger comparison" sub="Metric deltas from the benchmark response">
-              <PlotlyChart figure={benchmarkComparisonFigure} style={{ height: "100%" }} />
-            </Card>
+              <Card title="Champion vs Challenger comparison" sub="Metric deltas from the benchmark response">
+                <PlotlyChart figure={benchmarkComparisonFigure} style={{ height: "100%" }} />
+              </Card>
 
-            <Card title="ROC overlay chart" sub="Champion vs selected benchmark model">
-              <PlotlyChart figure={benchmarkOverlayFigure} style={{ height: "100%" }} />
-            </Card>
-          </section>
+              <Card title="ROC overlay chart" sub="Champion vs selected benchmark model">
+                <PlotlyChart figure={benchmarkOverlayFigure} style={{ height: "100%" }} />
+              </Card>
+            </section>
+          ) : null}
         </div>
       ) : null}
 

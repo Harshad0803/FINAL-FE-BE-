@@ -104,7 +104,7 @@ from explainability import (
 )
 from val_replication_core import (
     extract_metrics_from_mdd, parse_mdd_file, run_replication, evaluate_replication_checks,
-    run_bias_check, detect_protected_columns,
+    run_bias_check, detect_protected_columns, _gini, _ks,
 )
 from validation_stress_core import run_stress_suite, run_manual_shock
 
@@ -2684,6 +2684,14 @@ def _run_benchmark_comparison(
         bm_proba_2d = pipeline.predict_proba(X_test)
         bm_pred = pipeline.predict(X_test)
         bm_metrics = compute_binary_metrics(np.asarray(y_true).astype(int), bm_pred, bm_proba_2d, threshold=None)
+        # compute_binary_metrics() never returns "gini" — it's not one of the
+        # keys it computes. The champion side (val_replication_core._fit_core)
+        # adds it separately via _gini()/_ks() after calling the same
+        # function; do the same here so the challenger isn't silently missing
+        # it in the champion-vs-challenger comparison.
+        bm_scores = eval_engine._to_scores(bm_proba_2d)
+        bm_metrics["gini"] = _gini(np.asarray(y_true).astype(int), bm_scores)
+        bm_metrics["ks"] = _ks(np.asarray(y_true).astype(int), bm_scores)
     except Exception as e:
         return {
             "model_name": challenger_model_name,
@@ -2709,6 +2717,17 @@ def _run_benchmark_comparison(
             "roc_auc": bm_auc,
             "gini": bm_gini,
             "recall": bm_recall,
+            # Exposed so a low recall is explainable rather than a black box:
+            # compute_binary_metrics() auto-selects the F1-maximizing
+            # threshold (see evaluate_new.select_best_threshold) rather than
+            # a naive 0.5 cutoff, so "recall is low" usually means that
+            # threshold landed high to protect precision on this dataset's
+            # class balance — these fields show exactly where and why.
+            "precision": bm_metrics.get("precision"),
+            "f1": bm_metrics.get("f1"),
+            "accuracy": bm_metrics.get("accuracy"),
+            "ks": bm_metrics.get("ks"),
+            "threshold_used": bm_metrics.get("threshold_used"),
         },
         "comparison": {
             "champion_vs_challenger": {
@@ -2909,6 +2928,8 @@ async def validation_performance(
     val_size: float = Form(0.15),
     random_seed: int = Form(42),
     cv_folds: int = Form(5),
+    mdd_file: Optional[UploadFile] = File(None),
+    reported_json: Optional[str] = Form(None),
 ) -> Dict[str, Any]:
     """Stage 4 — Benchmarking only.
 
@@ -2919,10 +2940,17 @@ async def validation_performance(
     endpoint still fits the champion model (same replication core) because
     the champion-vs-challenger comparison needs a freshly-fit champion to
     compare against the selected challenger model, and the ROC overlay
-    chart needs the champion's ROC points — but it no longer computes or
-    returns the rest of the performance report, and no longer takes
-    intake/MDD/reported-metrics params, since those only fed the parts
-    that moved.
+    chart needs the champion's ROC points.
+
+    `mdd_file` / `reported_json` (optional, combinable — same precedence as
+    /validation/replication: MDD-extracted values win per-key over
+    `reported_json`) restore what this endpoint used to drop when Stage 3/4
+    were split: wherever the MDD documents a metric for the champion (e.g.
+    recall), that documented value is shown here instead of the freshly
+    re-fit replica's recomputed number, since the champion side of this
+    comparison is meant to reflect what was actually reported for the
+    champion, not a brand-new fit's incidental test-split performance.
+    Metrics the MDD doesn't mention keep the replica's computed value.
 
     `challenger_model_name` is a real registry model name (see
     GET /models/list) — typically whichever model the reviewer picked
@@ -2941,6 +2969,29 @@ async def validation_performance(
     except Exception:
         seed_list = [random_seed]
 
+    mdd_reported: Dict[str, Any] = {}
+    if reported_json:
+        try:
+            parsed = json.loads(reported_json)
+            if isinstance(parsed, dict):
+                mdd_reported.update({k: v for k, v in parsed.items() if v is not None})
+        except Exception:
+            pass
+    if mdd_file is not None:
+        try:
+            # Same sync-file-object bridge /validation/replication uses —
+            # parse_mdd_file expects .name/.seek()/.read(), FastAPI's
+            # UploadFile is async, so reach through to the underlying
+            # SpooledTemporaryFile.
+            mdd_file.file.seek(0)
+            mdd_underlying = mdd_file.file
+            mdd_underlying.name = mdd_file.filename or ""
+            mdd_text = parse_mdd_file(mdd_underlying)
+            mdd_extracted = extract_metrics_from_mdd(mdd_text)
+            mdd_reported.update({k: v for k, v in mdd_extracted.items() if v is not None})
+        except Exception:
+            pass
+
     replication_result = run_replication(
         df=df,
         target_col=target_col,
@@ -2953,6 +3004,18 @@ async def validation_performance(
         seeds=seed_list,
     )
 
+    # Champion metrics shown/benchmarked here prefer the MDD-reported value
+    # over the freshly re-fit replica's number, per-key, wherever the MDD
+    # provided one — mutated in place so both the top-level `metrics` below
+    # AND _run_benchmark_comparison's champion_vs_challenger figures
+    # (which reads replication_result["metrics"] directly) stay consistent.
+    if mdd_reported:
+        champion_metrics_raw = dict(replication_result.get("metrics") or {})
+        for key, value in mdd_reported.items():
+            if key in champion_metrics_raw:
+                champion_metrics_raw[key] = value
+        replication_result["metrics"] = champion_metrics_raw
+
     y_true = replication_result.get("y_test")
     y_proba = replication_result.get("y_proba")
     y_true_arr = np.asarray(y_true).astype(int) if y_true is not None else None
@@ -2960,6 +3023,8 @@ async def validation_performance(
 
     metrics = dict(replication_result.get("metrics") or {})
     metrics = {k: _json_safe_scalar(v) for k, v in metrics.items()}
+    if mdd_reported:
+        metrics["mdd_reported"] = mdd_reported
 
     roc_curve = []
     if y_true_arr is not None and y_proba_arr is not None:
@@ -3283,6 +3348,7 @@ async def validation_stress_run(
         cv_folds=cv_folds,
         reported={},
         seeds=seed_list,
+        compute_seed_stability=False,
     )
 
     suite = run_stress_suite(rep_result, val_df=df, freq_key=freq or "quarterly", date_col=date_col)
@@ -3335,6 +3401,7 @@ async def validation_stress_shock(
         cv_folds=cv_folds,
         reported={},
         seeds=seed_list,
+        compute_seed_stability=False,
     )
 
     try:
