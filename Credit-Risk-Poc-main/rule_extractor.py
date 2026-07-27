@@ -81,24 +81,32 @@ STAGE_KEYWORDS: dict[str, list[str]] = {
 def _build_stage_prompt(stage: str) -> str:
     """Focused prompt for one validation stage — MDD documentation requirements only."""
     return f"""
-You are a regulatory model-risk analyst specialising in SS1/23 and IFRS 9.
+You are a regulatory model-risk analyst.
 
-From the knowledge base, list EVERY requirement that SS1/23 and IFRS 9 place on
-what a Model Development Document (MDD) must contain or demonstrate for the
-'{stage}' aspect: {_STAGE_DESC[stage]}
+From the knowledge base, identify ALL regulatory requirements related to what a
+Model Development Document (MDD) must contain or demonstrate for the
+'{stage}' aspect:
 
-For each requirement output exactly one block — no intro, no markdown, no numbering:
+{_STAGE_DESC[stage]}
+
+Do not assume any specific regulatory framework.
+Extract requirements from whichever regulatory documents are available in the
+knowledge base and preserve the original regulatory reference.
+
+For each requirement output exactly one block:
 
 RULE_START
-RULE_ID: <standard + reference, e.g. "SS1/23 Principle 3.2" or "IFRS 9 B5.5.28">
+RULE_ID: <original regulatory reference exactly as it appears in the document>
 DESCRIPTION: <one or two sentence plain-English statement of what the MDD must include or demonstrate>
-MDD_SECTION: <the MDD section where this is typically documented, e.g. "Data Description", "Model Selection">
-KEYWORDS: <comma-separated list of 3-6 words/phrases that should appear in the MDD if this requirement is met>
+MDD_SECTION: <the MDD section where this is typically documented>
+KEYWORDS: <comma-separated list of 3-6 words/phrases>
 SEVERITY: <high | medium | low>
 RULE_END
 
-Only output rules relevant to '{stage}'. Focus on documentation requirements —
-what must be WRITTEN IN the MDD — not on automated data checks.
+Only output rules relevant to '{stage}'.
+Focus on documentation requirements only.
+Do not invent references.
+Keep the original document name and principle/reference unchanged.
 No text before the first RULE_START or after the last RULE_END.
 """.strip()
 

@@ -139,6 +139,8 @@ SourceAgent2 = _source_agent2_module.Agent2
 app = FastAPI()
 
 _ALLOWED_ORIGINS = [
+    "http://192.168.1.19:3000",
+    "http://192.168.1.19:5173",
     "http://localhost:8080",
     "http://localhost:3000",
     "http://localhost:5173",
