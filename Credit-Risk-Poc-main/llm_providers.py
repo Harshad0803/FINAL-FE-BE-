@@ -14,8 +14,10 @@ HTTP failure from Deloitte.
 Configuration — environment variables (see .env.example, none of this is
 hardcoded):
 
-  DELOITTE_AGENT_URL          Base URL of the Deloitte Agent completion endpoint.
-  DELOITTE_API_KEY            API key / bearer token for the Deloitte Agent.
+  DELOITTE_AGENT_URL          Primary GenW/Deloitte Agent completion endpoint.
+  GENW_AGENT_URL              Alternate name for the same primary endpoint.
+  LLM_CHECK_AGENT_URL         Alternate name for the same primary endpoint.
+  DELOITTE_API_KEY            API key / bearer token for the primary endpoint.
   DELOITTE_TIMEOUT_SECONDS    Optional request timeout in seconds (default 120).
 
   OLLAMA_URL                  Base URL of the Ollama server (default: http://localhost:11434).
@@ -36,6 +38,24 @@ import os
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency fallback
+    load_dotenv = None
+
+# Load backend-local environment variables (e.g. 24-06/.env) when present.
+_DOTENV_CANDIDATES = [
+    Path.cwd() / ".env",
+    Path(__file__).resolve().parent / ".env",
+    Path(__file__).resolve().parent.parent / ".env",
+    Path(__file__).resolve().parent.parent / "24-06" / ".env",
+]
+for _candidate in _DOTENV_CANDIDATES:
+    if load_dotenv is not None and _candidate.exists():
+        load_dotenv(_candidate, override=False)
+        break
 
 
 class LLMProviderError(RuntimeError):
@@ -51,12 +71,21 @@ class LLMProvider(ABC):
 
 
 class DeloitteAgentProvider(LLMProvider):
-    """Primary provider. Configure via DELOITTE_AGENT_URL / DELOITTE_API_KEY."""
+    """Primary provider. Configure via DELOITTE_AGENT_URL / GENW_AGENT_URL / LLM_CHECK_AGENT_URL."""
 
     name = "deloitte_agent"
 
     def __init__(self):
-        self.url = os.environ.get("DELOITTE_AGENT_URL", "").strip()
+        self.url = ""
+        for env_key in (
+            "DELOITTE_AGENT_URL",
+            "GENW_AGENT_URL",
+            "LLM_CHECK_AGENT_URL",
+        ):
+            value = os.environ.get(env_key, "").strip()
+            if value:
+                self.url = value
+                break
         self.api_key = os.environ.get("DELOITTE_API_KEY", "").strip()
         self.timeout = float(os.environ.get("DELOITTE_TIMEOUT_SECONDS", "120"))
 

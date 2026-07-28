@@ -3551,10 +3551,14 @@ def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None, select
     raw_findings = [f for f in findings]
     rag_results = rag_results or []
 
-    threshold_checks = [_normalize_threshold_check(f) for f in raw_findings]
+    filtered_findings = raw_findings
+    if selected_frameworks:
+        filtered_findings = [f for f in raw_findings if _rule_matches_frameworks(f, selected_frameworks)]
+
+    threshold_checks = [_normalize_threshold_check(f) for f in filtered_findings]
     rag_rules = [_normalize_rag_rule(r) for r in rag_results]
 
-    combined = raw_findings + rag_results
+    combined = filtered_findings + rag_results
     stage2_counts = {
         "pass": sum(1 for f in combined if f.get("status") == "PASS"),
         "warn": sum(1 for f in combined if f.get("status") == "WARN"),
@@ -3583,11 +3587,17 @@ def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None, select
     if not remediation_items:
         remediation_items.append("No material remediation required at this stage.")
 
-    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "SS1/23": "SS1/23", "RBI": "RBI Model Risk Management"}
-    regulatory_references = sorted({f.get("source") for f in combined if f.get("source")})
+    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "IFRS 9": "IFRS 9", "SS1/23": "SS1/23", "SS11/13": "SS11/13", "RBI": "RBI Model Risk Management"}
+
+    def _display_framework_name(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        return _FRAMEWORK_DISPLAY.get(str(value), str(value))
+
+    regulatory_references = sorted({_display_framework_name(f.get("source")) for f in combined if f.get("source")})
     if not regulatory_references:
         if selected_frameworks:
-            regulatory_references = [_FRAMEWORK_DISPLAY.get(fw, fw) for fw in selected_frameworks]
+            regulatory_references = [_display_framework_name(fw) for fw in selected_frameworks]
         else:
             regulatory_references = ["IFRS 9", "SS11/13", "SS1/23"]
 
@@ -4236,6 +4246,8 @@ async def validation_stage2_llm(
         except Exception:
             intake = {}
 
+    selected_frameworks = intake.get("frameworks") if isinstance(intake, dict) else None
+
     mdd_text = ""
     if mdd_file is not None:
         try:
@@ -4253,7 +4265,12 @@ async def validation_stage2_llm(
         only_ids = [s.strip() for s in only_rule_ids.split(",") if s.strip()]
 
     try:
-        llm_results = agent.check_documents_with_llm(docs, stage="data_validation", only_rule_ids=only_ids)
+        llm_results = agent.check_documents_with_llm(
+            docs,
+            stage="data_validation",
+            only_rule_ids=only_ids,
+            frameworks=selected_frameworks,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM deep-check failed: {e}")
 

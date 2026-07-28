@@ -103,8 +103,9 @@ class Agent2:
           {check_id, title, severity, status, source, principle, observed, threshold, detail}
         """
         findings: list[dict] = []
+        normalized_stage = self._normalize_stage(stage)
         for rule in self.rules:
-            if rule.get("stage") not in (stage, self._map_stage(stage)):
+            if not self._stages_match(rule.get("stage"), normalized_stage):
                 continue
             if not _rule_matches_frameworks(rule, frameworks):
                 continue
@@ -134,9 +135,30 @@ class Agent2:
         return findings
 
     @staticmethod
+    def _normalize_stage(stage: str | None) -> str:
+        """Normalize stage names so legacy and current names are treated as equivalent."""
+        if not stage:
+            return ""
+        normalized = str(stage).strip().lower()
+        return {
+            "data": "data_validation",
+            "data_validation": "data_validation",
+            "conceptual": "conceptual_soundness",
+            "conceptual_soundness": "conceptual_soundness",
+        }.get(normalized, normalized)
+
+    @classmethod
+    def _stages_match(cls, rule_stage: Any, requested_stage: str) -> bool:
+        """Return True when a rule stage matches the requested stage, including legacy aliases."""
+        if not requested_stage:
+            return True
+        normalized_rule_stage = cls._normalize_stage(rule_stage)
+        return normalized_rule_stage == requested_stage
+
+    @staticmethod
     def _map_stage(stage: str) -> str:
-        """Map legacy stage names to current ones."""
-        return {"data": "data_validation", "conceptual": "conceptual_soundness"}.get(stage, stage)
+        """Map legacy stage names to current ones for callers that still use the old helper."""
+        return Agent2._normalize_stage(stage)
 
     # ── MDD keyword-search cross-check ────────────────────────────────────────
 
@@ -243,14 +265,14 @@ class Agent2:
         `reasoning`.
         """
         candidate_rules: list[dict] = []
+        normalized_stage = self._normalize_stage(stage)
         for rule in self.rules:
             # Machine-testable rules stay on check_for_validation — never
             # routed to the LLM.
             if rule.get("checkable_against_data", False):
                 continue
             if stage is not None:
-                rule_stage = rule.get("stage", "")
-                if rule_stage not in (stage, self._map_stage(stage)):
+                if not self._stages_match(rule.get("stage"), normalized_stage):
                     continue
             if not _rule_matches_frameworks(rule, frameworks):
                 continue
