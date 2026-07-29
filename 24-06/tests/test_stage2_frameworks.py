@@ -82,3 +82,43 @@ def test_stage2_llm_check_follows_selected_frameworks(monkeypatch):
 
     assert response.status_code == 200
     assert dummy_agent.calls[0]["frameworks"] == ["RBI"]
+
+
+def test_group_stage2_normalizes_framework_display_names_in_payload():
+    report = {
+        "findings_by_stage": {
+            "Stage 2: Data Validation": [
+                {
+                    "check_id": "2.1",
+                    "title": "RBI finding",
+                    "severity": "HIGH",
+                    "status": "FAIL",
+                    "source": "RBI",
+                    "principle": "Chapter IV Section 26(1)",
+                    "observed": "1",
+                    "threshold": "0",
+                    "detail": "RBI detail",
+                }
+            ]
+        }
+    }
+
+    grouped = main._group_stage2(
+        report,
+        rag_results=[
+            {
+                "rule_id": "R1",
+                "flag": "Example rule",
+                "suggestion": "Example suggestion",
+                "severity": "MEDIUM",
+                "status": "WARN",
+                "source": "RBI",
+                "principle": "Chapter IV",
+            }
+        ],
+        selected_frameworks=["RBI"],
+    )
+
+    assert grouped["thresholdChecks"][0]["source"] == "RBI Model Risk Management"
+    assert grouped["ragRules"][0]["source"] == "RBI Model Risk Management"
+    assert grouped["regulatoryAlignment"]["regulatory_references"] == ["RBI Model Risk Management"]

@@ -152,9 +152,12 @@ _ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:8081",
     "http://127.0.0.1:3001",
-    "https://final-ok9cvxfh0-harshads-projects-d63c4e68.vercel.app",
+
 ]
-_ALLOWED_ORIGIN_REGEX = re.compile(r"https://.*-harshads-projects-d63c4e68\.vercel\.app")
+
+_ALLOWED_ORIGIN_REGEX = re.compile(
+    r"^https?://(localhost|127\.0\.0\.1|192\.168\.1\.19)(:\d+)?$"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -615,11 +618,19 @@ def _sync_file_like(upload_file: UploadFile) -> _SyncFileLike:
 def _load_source_agent2() -> Optional["SourceAgent2"]:
     """Cached loader for the RAG rule-matching Agent2 (val_mdd_rules.json)."""
     global _source_agent2
+    print("[LOAD-1] Entering _load_source_agent2")
     if _source_agent2 is not None:
+        print("[LOAD-4] Returning SourceAgent2")
         return _source_agent2
     try:
+        print("[LOAD-2] About to import Agent2")
         _source_agent2 = SourceAgent2(str(VAL_MDD_RULES_PATH))
+        print("[LOAD-3] Import succeeded")
+        print("[LOAD-4] Returning SourceAgent2")
     except Exception:
+        print("[LOAD-ERROR]")
+        import traceback
+        traceback.print_exc()
         _source_agent2 = None
     return _source_agent2
 
@@ -3452,6 +3463,24 @@ async def validation_agent2(
     return {"stage": "agent2", "flags": flags, "report": report}
 
 
+_FRAMEWORK_DISPLAY = {
+    "IFRS9": "IFRS 9",
+    "IFRS 9": "IFRS 9",
+    "SS1/23": "SS1/23",
+    "SS11/13": "SS11/13",
+    "RBI": "RBI Model Risk Management",
+}
+
+
+def _display_framework_name(value: Optional[str]) -> str:
+    """Return a user-facing label for a regulatory framework source."""
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return _FRAMEWORK_DISPLAY.get(value.strip(), value.strip())
+    return str(value)
+
+
 def _normalize_finding(f: dict) -> dict:
     """Return a frontend-friendly normalized finding dict."""
     return {
@@ -3464,7 +3493,7 @@ def _normalize_finding(f: dict) -> dict:
         "detail": f.get("detail"),
         "mdd_reference": f.get("mdd_reference"),
         "check_type": f.get("check_type"),
-        "source": f.get("source"),
+        "source": _display_framework_name(f.get("source")),
         "principle": f.get("principle"),
     }
 
@@ -3587,13 +3616,6 @@ def _group_stage2(report: dict, rag_results: Optional[List[dict]] = None, select
     if not remediation_items:
         remediation_items.append("No material remediation required at this stage.")
 
-    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "IFRS 9": "IFRS 9", "SS1/23": "SS1/23", "SS11/13": "SS11/13", "RBI": "RBI Model Risk Management"}
-
-    def _display_framework_name(value: Optional[str]) -> str:
-        if not value:
-            return ""
-        return _FRAMEWORK_DISPLAY.get(str(value), str(value))
-
     regulatory_references = sorted({_display_framework_name(f.get("source")) for f in combined if f.get("source")})
     if not regulatory_references:
         if selected_frameworks:
@@ -3648,7 +3670,7 @@ def _normalize_threshold_check(f: dict) -> dict:
         "title": f.get("title", ""),
         "severity": str(f.get("severity", "medium")).upper(),
         "status": f.get("status", "WARN"),
-        "source": f.get("source", ""),
+        "source": _display_framework_name(f.get("source", "")),
         "principle": f.get("principle", ""),
         "observed": f.get("observed", ""),
         "threshold": f.get("threshold", ""),
@@ -3667,7 +3689,7 @@ def _normalize_rag_rule(r: dict) -> dict:
         "suggestion": r.get("suggestion", r.get("detail", "")),
         "severity": str(r.get("severity", "medium")).upper(),
         "status": r.get("status", "WARN"),
-        "source": r.get("source", ""),
+        "source": _display_framework_name(r.get("source", "")),
         "principle": r.get("principle", ""),
         "observed_value": r.get("observed_value", r.get("observed")),
         "not_verifiable": bool(r.get("not_verifiable", False)),
@@ -3725,11 +3747,10 @@ def _group_stage3(report: dict, rag_results: Optional[List[dict]] = None, df=Non
     if not remediation_items:
         remediation_items.append("No material remediation required at this stage.")
 
-    _FRAMEWORK_DISPLAY = {"IFRS9": "IFRS 9", "SS1/23": "SS1/23", "RBI": "RBI Model Risk Management"}
-    regulatory_references = sorted({f.get("source") for f in combined if f.get("source")})
+    regulatory_references = sorted({_display_framework_name(f.get("source")) for f in combined if f.get("source")})
     if not regulatory_references:
         if selected_frameworks:
-            regulatory_references = [_FRAMEWORK_DISPLAY.get(fw, fw) for fw in selected_frameworks]
+            regulatory_references = [_display_framework_name(fw) for fw in selected_frameworks]
         else:
             regulatory_references = ["SS1/23", "SS11/13"]
 
@@ -4237,6 +4258,7 @@ async def validation_stage2_llm(
     returns PENDING stubs for these rules so the page isn't blocked on the
     LLM call — see that endpoint's mapped["llm_pending"] flag).
     """
+    print("========== ENTERED validation_stage2_llm ==========")
     agent = _load_source_agent2()
 
     intake = {}
@@ -4272,6 +4294,11 @@ async def validation_stage2_llm(
             frameworks=selected_frameworks,
         )
     except Exception as e:
+        import traceback
+
+        print("\n========== FULL EXCEPTION ==========")
+        traceback.print_exc()
+        print("====================================\n")
         raise HTTPException(status_code=500, detail=f"LLM deep-check failed: {e}")
 
     return {"llm_results": [_normalize_rag_rule(r) for r in llm_results]}
@@ -4290,6 +4317,7 @@ async def validation_stage3_llm(
     could not confidently resolve. Uses the source-of-truth Agent2 (val_mdd_rules.json),
     not the local 24-06 Agent2, which has no LLM/RAG rule methods.
     """
+    print("========== ENTERED validation_stage3_llm ==========")
     agent = _load_source_agent2()
 
     intake = {}
@@ -4327,6 +4355,11 @@ async def validation_stage3_llm(
             frameworks=selected_frameworks,
         )
     except Exception as e:
+        import traceback
+
+        print("\n========== FULL EXCEPTION ==========")
+        traceback.print_exc()
+        print("====================================\n")
         raise HTTPException(status_code=500, detail=f"LLM deep-check failed: {e}")
 
     return {"llm_results": [_normalize_rag_rule(r) for r in llm_results]}

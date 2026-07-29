@@ -264,6 +264,10 @@ class Agent2:
         ("llm" normally, "llm_error" if both providers failed) and
         `reasoning`.
         """
+        print("[DEBUG] check_documents_with_llm entered")
+        print(f"[DEBUG] docs type: {type(docs).__name__}")
+        if isinstance(docs, dict):
+            print(f"[DEBUG] docs keys: {list(docs.keys())}")
         candidate_rules: list[dict] = []
         normalized_stage = self._normalize_stage(stage)
         for rule in self.rules:
@@ -285,8 +289,12 @@ class Agent2:
             return []
 
         doc_text = "\n\n".join(f"### {name}\n{text}" for name, text in docs.items() if text)
+        print(f"[DEBUG] doc_text length: {len(doc_text)}")
 
-        if not doc_text:
+        early_return = not doc_text
+        print(f"[DEBUG] early return branch: {early_return}")
+
+        if early_return:
             # No document uploaded yet — surface every candidate rule as
             # PENDING so the "RAG Agent Rules" column still lists them
             # (mirrors check_mdd_keywords' behaviour with empty mdd_text).
@@ -309,7 +317,13 @@ class Agent2:
             try:
                 prompt = self._build_llm_prompt(batch, doc_text)
                 completion, provider_used = complete_with_fallback(prompt)
+
+                print("\n========== LLM COMPLETION ==========")
+                print(completion)
+                print("====================================\n")
+
                 verdicts_by_id, verdicts_by_index, verdicts_in_order = self._parse_llm_verdicts(completion)
+
             except (LLMProviderError, ValueError) as exc:
                 # Both providers failed for this batch, the response was
                 # empty, or it wasn't valid JSON — fail safe with a WARN for
