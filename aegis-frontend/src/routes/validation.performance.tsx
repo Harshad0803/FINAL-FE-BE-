@@ -575,7 +575,7 @@ function Performance() {
           </section>
 
           {payload ? (
-            <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <>
               <Card title="Industry benchmark table" sub="Selected challenger benchmark versus champion model">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -603,14 +603,20 @@ function Performance() {
                 </div>
               </Card>
 
-              <Card title="Champion vs Challenger comparison" sub="Metric deltas from the benchmark response">
-                <PlotlyChart figure={benchmarkComparisonFigure} style={{ height: "100%" }} />
-              </Card>
+              {/* Both cards render a 320px-tall Plotly figure, so pairing them
+                  in their own row (rather than sharing a row with the much
+                  shorter table above) keeps the two charts aligned instead of
+                  one trailing below on a half-empty row. */}
+              <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <Card title="Champion vs Challenger comparison" sub="Metric deltas from the benchmark response">
+                  <PlotlyChart figure={benchmarkComparisonFigure} style={{ height: "100%" }} />
+                </Card>
 
-              <Card title="ROC overlay chart" sub="Champion vs selected benchmark model">
-                <PlotlyChart figure={benchmarkOverlayFigure} style={{ height: "100%" }} />
-              </Card>
-            </section>
+                <Card title="ROC overlay chart" sub="Champion vs selected benchmark model">
+                  <PlotlyChart figure={benchmarkOverlayFigure} style={{ height: "100%" }} />
+                </Card>
+              </section>
+            </>
           ) : null}
         </div>
       ) : null}
