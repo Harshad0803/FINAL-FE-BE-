@@ -16,6 +16,7 @@ import { Route as ProfilingRouteImport } from './routes/profiling'
 import { Route as PreprocessingRouteImport } from './routes/preprocessing'
 import { Route as PdRouteImport } from './routes/pd'
 import { Route as ModelTrainingEvaluationRouteImport } from './routes/model-training-evaluation'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as ExplainabilityRouteImport } from './routes/explainability'
 import { Route as EvaluationRouteImport } from './routes/evaluation'
@@ -61,6 +62,11 @@ const PreprocessingRoute = PreprocessingRouteImport.update({
 const PdRoute = PdRouteImport.update({
   id: '/pd',
   path: '/pd',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeaturesRoute = FeaturesRouteImport.update({
@@ -157,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -182,6 +189,7 @@ export interface FileRoutesByTo {
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -207,6 +215,7 @@ export interface FileRoutesById {
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -234,6 +243,7 @@ export interface FileRouteTypes {
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -259,6 +269,7 @@ export interface FileRouteTypes {
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -309,6 +321,7 @@ export interface RootRouteChildren {
   EvaluationRoute: typeof EvaluationRoute
   ExplainabilityRoute: typeof ExplainabilityRoute
   FeaturesRoute: typeof FeaturesRoute
+  LoginRoute: typeof LoginRoute
   ModelTrainingEvaluationRoute: typeof ModelTrainingEvaluationRoute
   PdRoute: typeof PdRoute
   PreprocessingRoute: typeof PreprocessingRoute
@@ -360,6 +373,13 @@ declare module '@tanstack/react-router' {
       path: '/pd'
       fullPath: '/pd'
       preLoaderRoute: typeof PdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/features': {
@@ -520,6 +540,7 @@ const rootRouteChildren: RootRouteChildren = {
   EvaluationRoute: EvaluationRoute,
   ExplainabilityRoute: ExplainabilityRoute,
   FeaturesRoute: FeaturesRoute,
+  LoginRoute: LoginRoute,
   ModelTrainingEvaluationRoute: ModelTrainingEvaluationRoute,
   PdRoute: PdRoute,
   PreprocessingRoute: PreprocessingRoute,

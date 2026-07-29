@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 
 const LAST_WORKSPACE_KEY = "aegis_last_workspace";
 
@@ -115,10 +116,19 @@ function NavLinkItem({
   );
 }
 
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isLoginPage = pathname === "/login";
   const strictWorkspace = resolveWorkspace(pathname);
+  const { user } = useAuth();
 
   // Remember whichever real workspace (development/validation) the user was
   // last in, so neutral pages like /settings — which aren't part of either
@@ -139,7 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isNeutralPage = pathname === "/settings";
   const workspace = isNeutralPage ? lastWorkspace : strictWorkspace;
 
-  const isLanding = workspace === "landing";
+  const isLanding = workspace === "landing" || isLoginPage;
   // Hide the shared model tabs on the Data Upload page per UX request
   const showModelTabs = workspace === "development" && pathname !== "/data-upload";
   const nav = workspace === "validation" ? validationNav : developmentNav;
@@ -249,47 +259,51 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           )}
           {!isLanding && <div className="md:hidden text-sm font-semibold">Aegis Credit</div>}
-          <div className="ml-auto flex items-center gap-2">
-            {isLanding && (
-              <Link
-                to="/data-upload"
-                className="hidden items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:border-primary/40 sm:inline-flex"
-              >
-                Develop
-              </Link>
-            )}
-            {isLanding && (
-              <Link
-                to="/validation"
-                className="hidden items-center gap-1.5 rounded-lg gradient-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-elegant sm:inline-flex"
-              >
-                Validate
-              </Link>
-            )}
-            <Link
-              to="/settings"
-              aria-label="Settings"
-              className={cn(
-                "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground",
-                pathname === "/settings" && "border-primary/40 text-primary",
+          {!isLoginPage && (
+            <div className="ml-auto flex items-center gap-2">
+              {isLanding && (
+                <Link
+                  to="/data-upload"
+                  className="hidden items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:border-primary/40 sm:inline-flex"
+                >
+                  Develop
+                </Link>
               )}
-            >
-              <Settings className="h-4 w-4" />
-            </Link>
-            <button className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground">
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
-            </button>
-            <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-2 pr-3">
-              <div className="flex h-7 w-7 items-center justify-center rounded-md gradient-primary text-[11px] font-semibold text-primary-foreground">
-                HK
-              </div>
-              <div className="hidden text-left leading-tight sm:block">
-                <div className="text-xs font-semibold">Harshad</div>
-                <div className="text-[10px] text-muted-foreground">Risk Validator</div>
-              </div>
+              {isLanding && (
+                <Link
+                  to="/validation"
+                  className="hidden items-center gap-1.5 rounded-lg gradient-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-elegant sm:inline-flex"
+                >
+                  Validate
+                </Link>
+              )}
+              <Link
+                to="/settings"
+                aria-label="Settings"
+                className={cn(
+                  "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground",
+                  pathname === "/settings" && "border-primary/40 text-primary",
+                )}
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
+              <button className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground">
+                <Bell className="h-4 w-4" />
+                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
+              </button>
+              {user && (
+                <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-2 pr-3">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md gradient-primary text-[11px] font-semibold text-primary-foreground">
+                    {initialsFromName(user.name)}
+                  </div>
+                  <div className="hidden text-left leading-tight sm:block">
+                    <div className="text-xs font-semibold">{user.name}</div>
+                    <div className="text-[10px] text-muted-foreground">Risk Validator</div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </header>
 
         <main className="flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
