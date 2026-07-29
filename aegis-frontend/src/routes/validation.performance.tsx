@@ -5,6 +5,7 @@ import { ArrowRight, AlertCircle, Loader2, PlayCircle, Upload } from "lucide-rea
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { ApiError, formUpload } from "@/lib/api";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/performance")({
   head: () => ({ meta: [{ title: "Benchmarking — Aegis Credit" }] }),
@@ -123,6 +124,27 @@ function Performance() {
     if (cachedIsUsable) setChallengerPicked(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Resume where the reviewer left off: if nothing usable is already loaded
+  // this session, pull the last saved /validation/performance (benchmarking)
+  // run from the backend — same "actually usable" guard as the cached-context
+  // seed above, so a stale/incomplete save never appears pre-loaded either.
+  const { data: resumedBenchmark } = useResumeState<PerformanceResponse>(
+    "validation_pipeline_log.csv",
+    "benchmarking",
+  );
+  React.useEffect(() => {
+    if (payload) return;
+    const usable = Boolean(
+      resumedBenchmark?.report?.benchmark?.model_name && resumedBenchmark?.report?.benchmark?.status === "OK",
+    );
+    if (usable) {
+      setPayload(resumedBenchmark);
+      ds.setValidationStage5Result(resumedBenchmark as unknown as Record<string, any>);
+      setChallengerPicked(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedBenchmark]);
 
   const datasetName = ds.file?.name ?? ds.profile?.dataset_name ?? "uploaded dataset";
   const datasetReady = Boolean(ds.file || ds.profile?.csv_text || ds.profile?.dataset_name);
