@@ -7,6 +7,7 @@ import { ApiError, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { CheckSummaryTiles, deriveCheckTotal } from "@/components/check-summary";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/regulatory")({
   head: () => ({ meta: [{ title: "Stage 6 — Explainability and Fairness — Aegis Credit" }] }),
@@ -219,6 +220,23 @@ function Regulatory() {
   const [biasLoading, setBiasLoading] = useState(false);
   const [biasError, setBiasError] = useState<string | null>(null);
   const columnsFetched = useRef(false);
+
+  // Resume where the reviewer left off: this page maps to the
+  // "fair_lending_bias" stage since it's the one that calls POST
+  // /validation/stage7/bias-check. If nothing is loaded this session, pull
+  // the last saved run from the backend rather than starting blank.
+  const { data: resumedBias } = useResumeState<BiasResponse>(
+    "validation_pipeline_log.csv",
+    "fair_lending_bias",
+  );
+  useEffect(() => {
+    if (!biasData && resumedBias) {
+      setBiasData(resumedBias);
+      setValidationStage7BiasResult(resumedBias as unknown as Record<string, any>);
+      if (resumedBias.bias_col) setBiasCol(resumedBias.bias_col);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedBias]);
 
   // Fetch just the detected protected-characteristic columns on first load
   // (no protected_col posted yet) so the dropdown can populate itself.

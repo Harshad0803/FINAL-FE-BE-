@@ -17,6 +17,7 @@ import {
   BarChart3,
   Activity,
   ClipboardCheck,
+  History,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ const developmentNav: NavItem[] = [
   { to: "/data-preparation", label: "Data Preparation & Feature Engineering", icon: Layers },
   { to: "/model-training-evaluation", label: "Model Training & Evaluation", icon: Cpu },
   { to: "/explainability", label: "Explainability", icon: Sparkles },
+  { to: "/activity-log", label: "Activity Log", icon: History },
 ];
 
 const validationNav: NavItem[] = [
@@ -48,6 +50,7 @@ const validationNav: NavItem[] = [
   { to: "/validation/stress", label: "Stress & Backtesting", icon: Activity },
   { to: "/validation/regulatory", label: "Explainability and Fairness", icon: ShieldCheck },
   { to: "/validation/findings", label: "Findings & Final Report", icon: ClipboardCheck },
+  { to: "/activity-log", label: "Activity Log", icon: History },
 ];
 
 const developmentPaths = [
@@ -146,7 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [strictWorkspace]);
 
-  const isNeutralPage = pathname === "/settings";
+  const isNeutralPage = pathname === "/settings" || pathname === "/activity-log";
   const workspace = isNeutralPage ? lastWorkspace : strictWorkspace;
 
   const isLanding = workspace === "landing" || isLoginPage;

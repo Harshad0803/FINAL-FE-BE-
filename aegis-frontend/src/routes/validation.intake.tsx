@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/app-shell";
 import { api, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { ArrowRight, FileCheck, FileText, Upload, CheckCircle2, Circle } from "lucide-react";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/intake")({
   head: () => ({ meta: [{ title: "Model Intake — Aegis Credit" }] }),
@@ -183,6 +184,19 @@ function Intake() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [proceedError, setProceedError] = useState<string | null>(null);
+
+  // Resume where the reviewer left off: only pre-fills the (currently empty)
+  // model name field from the most recently saved intake run — it doesn't
+  // silently overwrite in-progress form data. The existing draft-lookup
+  // effect below then surfaces its own opt-in "restore this draft?" prompt
+  // once the name is filled in, same as if the reviewer had typed it.
+  const { data: resumedIntake } = useResumeState<{ model_name?: string }>("validation_pipeline_log.csv", "intake");
+  useEffect(() => {
+    if (!modelName.trim() && resumedIntake?.model_name) {
+      setModelName(resumedIntake.model_name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedIntake]);
 
   const toggleFramework = (fw: string) => {
     setFrameworks((prev) =>
