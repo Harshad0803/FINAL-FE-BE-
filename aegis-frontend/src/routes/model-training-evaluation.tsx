@@ -8,7 +8,6 @@ import { useDataset } from "@/lib/app-context";
 import { formUpload } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import PlotlyChart from "@/components/plotly-chart";
-import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/model-training-evaluation")({
   head: () => ({ meta: [{ title: "Model Training & Evaluation — Aegis Credit" }] }),
@@ -164,23 +163,6 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [modelComparison, setModelComparison] = useState<boolean>(false);
   const [modelsToCompare, setModelsToCompare] = useState<string[]>(compareModels ?? []);
-
-  // Resume where the reviewer left off: if this session has no training
-  // result yet, pull the last saved /models/train run from the backend.
-  const { data: resumedTraining } = useResumeState<Record<string, any>>("dev_pipeline_log.csv", "training");
-  useEffect(() => {
-    if (!trainingResult && resumedTraining) {
-      setTrainingResult(resumedTraining as any);
-      setTrainingInfo(resumedTraining?.training_info ?? null);
-      setSplitStats(resumedTraining?.split_stats ?? null);
-      setEvaluationMetrics(resumedTraining?.evaluation_metrics ?? null);
-      setModelArtifact(resumedTraining?.model_artifact ?? null);
-      setTaskType(resumedTraining?.task_type ?? null);
-      setTrainingModelName(resumedTraining?.model_name ?? null);
-      setTrainingConfigResult(resumedTraining?.training_config ?? null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedTraining]);
 
   // ── Decision threshold: auto (F1-maximizing, computed by the backend) by
   // default, with an optional manual override via the slider below. When
@@ -1571,19 +1553,7 @@ function EvalCard({ title, sub, children, className }: { title: string; sub?: st
 
 function EvaluationTab({ onBackToTraining }: { onBackToTraining: () => void }) {
   const navigate = useNavigate();
-  const { trainingResult, setTrainingResult } = useDataset();
-
-  // Resume where the reviewer left off: if this session has no training/
-  // evaluation result yet, pull the last saved /models/evaluate run from the
-  // backend and merge its evaluation_metrics/evaluation_data in.
-  const { data: resumedEvaluation } = useResumeState<Record<string, any>>("dev_pipeline_log.csv", "evaluation");
-  useEffect(() => {
-    if (!trainingResult && resumedEvaluation) {
-      setTrainingResult(resumedEvaluation as any);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedEvaluation]);
-
+  const { trainingResult } = useDataset();
   const [activeTab, setActiveTab] = useState<"summary" | "roc" | "pr" | "confusion" | "score" | "threshold" | "lift" | "residual" | "temporal">("summary");
   const [temporalDateColumn, setTemporalDateColumn] = useState<string | null>(null);
   const [temporalFrequency, setTemporalFrequency] = useState<string>("Quarterly");

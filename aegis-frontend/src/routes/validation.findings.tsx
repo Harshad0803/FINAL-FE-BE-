@@ -4,7 +4,6 @@ import { PageHeader } from "@/components/app-shell";
 import { ArrowRight, AlertTriangle, RefreshCw, Printer, ChevronDown, ChevronRight } from "lucide-react";
 import { ApiError, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
-import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/findings")({
   head: () => ({ meta: [{ title: "Stage 7 — Findings & Final Report — Aegis Credit" }] }),
@@ -157,23 +156,6 @@ function Findings() {
   const [data, setData] = React.useState<Stage8Response | null>((validationStage8Result as Stage8Response | null) ?? null);
   const skipInitialAutoRun = React.useRef(validationStage8Result !== null && validationStage8Result !== undefined);
   const [retryToken, setRetryToken] = React.useState(0);
-
-  // Resume where the reviewer left off: pulls the last saved "findings"-stage
-  // run from the backend's activity log. Only applied if nothing is already
-  // loaded AND the saved payload actually looks like this page's own
-  // Stage8Response shape (has a `findings` array) — otherwise left alone, so
-  // a run saved under the same stage name by a different findings endpoint
-  // never corrupts this page's state.
-  const { data: resumedFindings } = useResumeState<Record<string, any>>("validation_pipeline_log.csv", "findings");
-  React.useEffect(() => {
-    if (!data && resumedFindings && Array.isArray((resumedFindings as any).findings)) {
-      setData(resumedFindings as Stage8Response);
-      setValidationStage8Result(resumedFindings);
-      skipInitialAutoRun.current = true;
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedFindings]);
 
   React.useEffect(() => {
     if (skipInitialAutoRun.current) {

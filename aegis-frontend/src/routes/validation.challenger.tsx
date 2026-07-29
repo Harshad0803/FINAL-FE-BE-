@@ -17,7 +17,6 @@ import {
 import PlotlyChart from "@/components/plotly-chart";
 import { formUpload, ApiError } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
-import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/challenger")({
   head: () => ({ meta: [{ title: "Model Replication & Performance — Aegis Credit" }] }),
@@ -154,28 +153,6 @@ function ModelReplicationPanel({
   const [performanceReport, setPerformanceReport] = React.useState<ReplicationResponse["report"] | null>(
     (ds.validationStage4Result?.performanceReport as ReplicationResponse["report"] | null) ?? null,
   );
-
-  // Resume where the reviewer left off: if this session has no replication
-  // result yet, pull the last saved /validation/replication run from the
-  // backend (this page maps to the "replication" stage since it's the one
-  // that actually calls POST /validation/replication).
-  const { data: resumedReplication } = useResumeState<ReplicationResponse>(
-    "validation_pipeline_log.csv",
-    "replication",
-  );
-  React.useEffect(() => {
-    if (!replication && resumedReplication?.report?.replication) {
-      setReplication(resumedReplication.report.replication);
-      setFlags(resumedReplication.flags ?? []);
-      setPerformanceReport(resumedReplication.report);
-      ds.setValidationStage4Result({
-        replication: resumedReplication.report.replication,
-        flags: resumedReplication.flags ?? [],
-        performanceReport: resumedReplication.report,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedReplication]);
 
   // profile / trainingResult shapes aren't strictly typed on the context
   // (Record<string, any>), so field access below is defensive with fallbacks.

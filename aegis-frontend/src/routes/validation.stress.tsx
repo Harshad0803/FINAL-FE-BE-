@@ -6,7 +6,6 @@ import { CheckSummaryTiles } from "@/components/check-summary";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
-import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/validation/stress")({
   head: () => ({ meta: [{ title: "Stress & Backtesting — Aegis Credit" }] }),
@@ -89,19 +88,6 @@ function Stress() {
   const [shockRunning, setShockRunning] = useState(false);
   const [shockError, setShockError] = useState<string | null>(null);
   const [shockResult, setShockResult] = useState<any | null>(null);
-
-  // Resume where the reviewer left off: if this session has no stress-test
-  // report yet, pull the last saved /validation/stress/run from the backend.
-  const { data: resumedStress } = useResumeState<{ stage: string; report: any }>(
-    "validation_pipeline_log.csv",
-    "stress_testing",
-  );
-  useEffect(() => {
-    if (!report && resumedStress?.report) {
-      setReport(resumedStress.report);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedStress]);
 
   useEffect(() => {
     void api<{ models: string[] }>("/models/list")

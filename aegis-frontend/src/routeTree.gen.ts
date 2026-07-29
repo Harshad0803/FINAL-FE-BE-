@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ActivityLogRouteImport } from './routes/activity-log'
 import { Route as ValidationRouteImport } from './routes/validation'
 import { Route as TrainingRouteImport } from './routes/training'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -35,11 +34,6 @@ import { Route as ValidationDataQualityRouteImport } from './routes/validation.d
 import { Route as ValidationConceptualRouteImport } from './routes/validation.conceptual'
 import { Route as ValidationChallengerRouteImport } from './routes/validation.challenger'
 
-const ActivityLogRoute = ActivityLogRouteImport.update({
-  id: '/activity-log',
-  path: '/activity-log',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ValidationRoute = ValidationRouteImport.update({
   id: '/validation',
   path: '/validation',
@@ -163,7 +157,6 @@ const ValidationChallengerRoute = ValidationChallengerRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
@@ -190,7 +183,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
@@ -217,7 +209,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
@@ -246,7 +237,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -273,7 +263,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -299,7 +288,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -327,7 +315,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ActivityLogRoute: typeof ActivityLogRoute
   DataPreparationRoute: typeof DataPreparationRoute
   DataUploadRoute: typeof DataUploadRoute
   DevelopmentRoute: typeof DevelopmentRoute
@@ -346,13 +333,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/activity-log': {
-      id: '/activity-log'
-      path: '/activity-log'
-      fullPath: '/activity-log'
-      preLoaderRoute: typeof ActivityLogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/validation': {
       id: '/validation'
       path: '/validation'
@@ -554,7 +534,6 @@ const ValidationRouteWithChildren = ValidationRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ActivityLogRoute: ActivityLogRoute,
   DataPreparationRoute: DataPreparationRoute,
   DataUploadRoute: DataUploadRoute,
   DevelopmentRoute: DevelopmentRoute,
