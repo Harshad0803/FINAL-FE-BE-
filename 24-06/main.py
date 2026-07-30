@@ -3653,20 +3653,10 @@ async def validation_agent2(
 
     result = {"stage": "agent2", "flags": flags, "report": report}
 
-    try:
-        all_findings = report.get("all_findings", [])
-        persistence.log_event(
-            persistence.VALIDATION_PIPELINE_LOG,
-            stage="findings",
-            payload={
-                "num_findings": len(all_findings),
-                "num_failed": len(flags),
-                "overall_result": "FAIL" if flags else "PASS",
-            },
-            full_payload=result,
-        )
-    except Exception as e:
-        print(f"[persistence] failed to log findings: {e}")
+    # No persistence logging here: the frontend never calls this endpoint
+    # (it uses /validation/stage8/findings instead, which is where
+    # stage="findings" is now logged). Left uninstrumented rather than
+    # removed since it's still a working endpoint.
 
     return result
 
@@ -4152,6 +4142,19 @@ async def validation_stage3_run(
     mapped["llm_pending"] = bool(mdd_text)
     mapped["timestamp"] = pd.Timestamp.now().isoformat()
 
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="conceptual_soundness",
+            payload={
+                "summary": mapped.get("summary"),
+                "verdict": mapped.get("regulatoryAlignment", {}).get("verdict"),
+            },
+            full_payload=mapped,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log conceptual_soundness: {e}")
+
     return mapped
 
 
@@ -4427,7 +4430,7 @@ async def validation_stage8_findings(
         monitoring_frequency = "Semi-annually"
         revalidation_trigger = "Every 2 years (or triggered by model change)"
 
-    return {
+    result = {
         "findings": all_findings,
         "verdict": verdict,
         "verdict_desc": verdict_desc,
@@ -4441,6 +4444,23 @@ async def validation_stage8_findings(
         "stated_auc": stated_auc,
         "replicated_auc": rep_auc,
     }
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="findings",
+            payload={
+                "verdict": verdict,
+                "high_count": high_count,
+                "medium_count": medium_count,
+                "total_count": total_count,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log findings: {e}")
+
+    return result
 
 
 @app.post("/validation/stage2/llm-check")

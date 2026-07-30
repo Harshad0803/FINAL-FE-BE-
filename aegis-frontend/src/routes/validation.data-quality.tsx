@@ -121,16 +121,18 @@ function DataQuality() {
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // Resume where the reviewer left off: this page's checks are keyed off the
-  // "replication" stage's saved runs per the shared activity log. Only
-  // applied if nothing is already loaded and the saved payload actually
-  // looks like this page's own StageCheckResponse shape (has a `checks`
-  // array) — otherwise left untouched so a mismatched save never corrupts
-  // this page's state.
-  const { data: resumedStage3 } = useResumeState<Record<string, any>>("validation_pipeline_log.csv", "replication");
+  // Resume where the reviewer left off: this page's Conceptual Soundness
+  // sub-tab is keyed off the "replication" stage's saved runs per the shared
+  // activity log (backed by /validation/stage3/run, the endpoint this page
+  // actually calls for that state). Only applied if nothing is already
+  // loaded and the saved payload actually looks like this page's own
+  // StageCheckResponse shape (has a `thresholdChecks` array) — otherwise
+  // left untouched so a mismatched save never corrupts this page's state.
+  const { data: resumedStage3 } = useResumeState<StageCheckResponse>("validation_pipeline_log.csv", "conceptual_soundness");
   useEffect(() => {
-    if (!validationStage3Result && resumedStage3 && Array.isArray((resumedStage3 as any).checks)) {
-      setValidationStage3Result(resumedStage3);
+    if (!validationStage3Result && resumedStage3 && Array.isArray(resumedStage3.thresholdChecks)) {
+      setValidationStage3Result(resumedStage3 as unknown as Record<string, any>);
+      setConceptualData(resumedStage3);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumedStage3]);
