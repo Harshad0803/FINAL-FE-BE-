@@ -22,12 +22,17 @@ Documentation text:
 
 CRITICAL OUTPUT FORMAT:
   - Output ONLY a JSON array — literally starting with "[" and ending
-    with "]" — even if there is only one rule. NEVER output a single bare
-    JSON object on its own; it must always be wrapped in "[ ]".
+    with "]" — EVEN IF there is only one rule. The output MUST begin with
+    "[" and end with "]" exactly. RETURNING A SINGLE JSON OBJECT IS INVALID.
   - The array must contain EXACTLY one object per rule listed above
     ({{RULE_COUNT}} total) — do not omit, merge, or skip any rule.
   - No prose, no markdown code fences, no explanation before or after
     the array.
+  - IMPORTANT (for local Llama models): If you return a single JSON
+    object instead of an array, or if you add any extra text around the
+    array (markdown fences, commentary, or plain-text prefixes/suffixes),
+    the result will be rejected. Always return a pure JSON array with one
+    object per input rule.
 
 Each output object MUST have these fields:
   "index"     - REQUIRED. Copy the "index" number from the matching input
@@ -40,12 +45,13 @@ Each output object MUST have these fields:
                 "Not found" if the documentation doesn't address it.
   "reasoning" - <=20 words.
 
-Example of the exact shape required (showing the array wrapper, using 2
+Example of the exact shape required (showing the array wrapper, using 3
 rules as an example — adjust the number of objects to match the
 {{RULE_COUNT}} rule(s) actually given above):
 [
-  {"index": 0, "rule_id": "<copied>", "status": "PASS|WARN|FAIL", "evidence": "<<=20 words, or 'Not found'>", "reasoning": "<<=20 words>"},
-  {"index": 1, "rule_id": "<copied>", "status": "PASS|WARN|FAIL", "evidence": "<<=20 words, or 'Not found'>", "reasoning": "<<=20 words>"}
+  {"index": 0, "rule_id": "<copied>", "status": "PASS|WARN|FAIL", "evidence": "<<=20 words, or 'Not found'>>", "reasoning": "<<=20 words>>"},
+  {"index": 1, "rule_id": "<copied>", "status": "PASS|WARN|FAIL", "evidence": "<<=20 words, or 'Not found'>>", "reasoning": "<<=20 words>>"},
+  {"index": 2, "rule_id": "<copied>", "status": "PASS|WARN|FAIL", "evidence": "<<=20 words, or 'Not found'>>", "reasoning": "<<=20 words>>"}
 ]
 
 Before answering, count your output objects and confirm the count equals

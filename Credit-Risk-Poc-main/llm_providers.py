@@ -37,6 +37,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -44,6 +45,8 @@ try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - optional dependency fallback
     load_dotenv = None
+
+print("[TRACE] Loaded llm_providers from:", __file__)
 
 # Load backend-local environment variables (e.g. 24-06/.env) when present.
 _DOTENV_CANDIDATES = [
@@ -131,10 +134,11 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self):
         self.base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-        self.model = os.environ.get("OLLAMA_MODEL", "llama3")
+        self.model = "llama3.2"
         self.timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180"))
 
     def complete(self, prompt: str) -> str:
+        print("[TRACE] Entered OllamaProvider.complete")
         payload = json.dumps({
             "model": self.model,
             "prompt": prompt,
@@ -143,28 +147,63 @@ class OllamaProvider(LLMProvider):
             # syntactically valid JSON output in this mode, which avoids
             # the truncated/empty-response failure mode of free-form
             # generation and is usually faster to converge on.
-            "format": "json",
+            "format": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "rule_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["PASS", "WARN", "FAIL"],
+                        },
+                        "evidence": {"type": "string"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["index", "rule_id", "status", "evidence", "reasoning"],
+                    "additionalProperties": False,
+                },
+            },
             # temperature 0 for deterministic, lower-latency decoding —
             # this is a rule-verdict task, not creative generation.
             "options": {"temperature": 0},
         }).encode("utf-8")
         headers = {"Content-Type": "application/json"}
 
+        prompt_preview = prompt[:100] + ("..." if len(prompt) > 100 else "")
         req = urllib.request.Request(f"{self.base_url}/api/generate", data=payload, headers=headers, method="POST")
         try:
+            start = time.time()
+            print("[TRACE] About to send HTTP request to Ollama")
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                print("[TRACE] HTTP request returned")
+                print(f"[TRACE] Ollama request took {time.time() - start:.2f} seconds")
                 if resp.status >= 400:
                     raise LLMProviderError(f"Ollama returned HTTP {resp.status}")
                 body = resp.read().decode("utf-8")
+                print("[TRACE] Response body read")
         except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                pass
             raise LLMProviderError(f"Ollama HTTP error: {e.code} {e.reason}") from e
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
             raise LLMProviderError(f"Ollama unreachable: {e}") from e
+        except Exception as e:
+            import traceback
+            print("[OLLAMA ERROR]", repr(e))
+            traceback.print_exc()
+            raise
 
         try:
             data = json.loads(body)
         except json.JSONDecodeError:
+            print("[TRACE] Leaving OllamaProvider.complete")
             return body
+        print("[TRACE] Leaving OllamaProvider.complete")
         return str(data.get("response", body))
 
 
@@ -176,10 +215,12 @@ def complete_with_fallback(prompt: str) -> tuple[str, str]:
     Returns (completion_text, provider_name_used).
     Raises LLMProviderError only if BOTH providers fail.
     """
+    print("[TRACE] Entered complete_with_fallback")
     deloitte = DeloitteAgentProvider()
     errors: list[str] = []
 
     if deloitte.is_configured():
+        print("[TRACE] Trying Deloitte provider")
         try:
             return deloitte.complete(prompt), deloitte.name
         except LLMProviderError as e:
@@ -188,9 +229,15 @@ def complete_with_fallback(prompt: str) -> tuple[str, str]:
         errors.append("Deloitte Agent not configured (DELOITTE_AGENT_URL unset) — falling back to Ollama.")
 
     ollama = OllamaProvider()
+    print("[TRACE] Trying Ollama provider")
     try:
-        return ollama.complete(prompt), ollama.name
+        print(f"[TRACE] Prompt length: {len(prompt)} characters")
+    
+        result = ollama.complete(prompt), ollama.name
+        print("[TRACE] Ollama provider returned successfully")
+        return result
     except LLMProviderError as e:
         errors.append(str(e))
 
+    print("[TRACE] All providers failed")
     raise LLMProviderError("All LLM providers failed: " + " | ".join(errors))
