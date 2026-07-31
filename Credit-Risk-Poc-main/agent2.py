@@ -264,12 +264,10 @@ class Agent2:
         ("llm" normally, "llm_error" if both providers failed) and
         `reasoning`.
         """
-        print("[DEBUG] check_documents_with_llm entered")
-        print(f"[DEBUG] docs type: {type(docs).__name__}")
-        if isinstance(docs, dict):
-            print(f"[DEBUG] docs keys: {list(docs.keys())}")
+        print("[TRACE] Entered check_documents_with_llm")
         candidate_rules: list[dict] = []
         normalized_stage = self._normalize_stage(stage)
+        print("[TRACE] About to start processing rules")
         for rule in self.rules:
             # Machine-testable rules stay on check_for_validation — never
             # routed to the LLM.
@@ -289,10 +287,8 @@ class Agent2:
             return []
 
         doc_text = "\n\n".join(f"### {name}\n{text}" for name, text in docs.items() if text)
-        print(f"[DEBUG] doc_text length: {len(doc_text)}")
 
         early_return = not doc_text
-        print(f"[DEBUG] early return branch: {early_return}")
 
         if early_return:
             # No document uploaded yet — surface every candidate rule as
@@ -312,102 +308,69 @@ class Agent2:
         # batches mean smaller, faster completions, and a failure in one
         # batch doesn't wipe out the rules in the others.
         results: list[dict] = []
-        for i in range(0, len(candidate_rules), self._LLM_BATCH_SIZE):
-            batch = candidate_rules[i:i + self._LLM_BATCH_SIZE]
-            try:
-                prompt = self._build_llm_prompt(batch, doc_text)
-                completion, provider_used = complete_with_fallback(prompt)
+        try:
+            prompt = self._build_llm_prompt(candidate_rules, doc_text)
+            print("[TRACE] About to call complete_with_fallback")
+            completion, provider_used = complete_with_fallback(prompt)
+            print("[TRACE] Returned from complete_with_fallback")
 
-                print("\n========== LLM COMPLETION ==========")
-                print(completion)
-                print("====================================\n")
+            verdicts_by_id, verdicts_by_index, verdicts_in_order = self._parse_llm_verdicts(completion)
 
-                verdicts_by_id, verdicts_by_index, verdicts_in_order = self._parse_llm_verdicts(completion)
-
-            except (LLMProviderError, ValueError) as exc:
-                # Both providers failed for this batch, the response was
-                # empty, or it wasn't valid JSON — fail safe with a WARN for
-                # just this batch's rules rather than dropping them, and
-                # keep the underlying error message distinct (see
-                # _parse_llm_verdicts) so a genuine timeout reads
-                # differently from a malformed-response error.
-                for rule in batch:
-                    results.append(self._llm_finding(
-                        rule, status="WARN", observed=f"LLM check unavailable: {exc}",
-                        reasoning="", check_source="llm_error",
-                    ))
-                continue
-
-            # Sanity check BEFORE per-rule matching: if the number of
-            # verdicts doesn't match the number of rules we sent — and this
-            # holds even at batch size 1 — the response almost certainly
-            # isn't tracking this request at all (e.g. the provider is
-            # ignoring/echoing a stale prompt, a cached response, or a
-            # canned demo payload unrelated to `prompt`). Per-rule id/index
-            # matching below can't distinguish that from an ordinary
-            # dropped-item case, and silently produces a confusing
-            # "none matching" message per rule. Surface it once, clearly,
-            # with the provider name and raw response so the actual
-            # contract problem (see llm_providers.py note on
-            # DeloitteAgentProvider.complete()) is visible instead of
-            # masked as an id-matching failure.
-            if len(verdicts_in_order) != len(batch):
-                diag = (
-                    f"LLM ({provider_used}) returned {len(verdicts_in_order)} verdict(s) for a "
-                    f"{len(batch)}-rule request — count mismatch suggests the response isn't "
-                    f"tracking this prompt (stale/cached/unrelated response from the provider), "
-                    f"not a dropped item. Raw response: {completion[:400]!r}"
-                )
-                for rule in batch:
-                    results.append(self._llm_finding(
-                        rule, status="WARN", observed=diag,
-                        reasoning="", check_source="llm_error",
-                    ))
-                continue
-
-            for idx, rule in enumerate(batch):
-                rule_id = str(rule.get("id", rule.get("check", "?")))
-                # Three layers, most to least reliable:
-                #  1. rule_id — works when the model echoes it back correctly.
-                #  2. explicit "index" field — survives a renamed/garbled
-                #     rule_id AND a dropped item elsewhere in the batch,
-                #     since it isn't affected by earlier entries going
-                #     missing the way plain response order is.
-                #  3. response order — only safe when the count matches the
-                #     batch exactly (no dropped/extra items), since a single
-                #     missing item would otherwise shift every rule after it.
-                #     (Verified above the counts match before we get here.)
-                verdict = verdicts_by_id.get(rule_id)
-                if verdict is None:
-                    verdict = verdicts_by_index.get(idx)
-                if verdict is None:
-                    verdict = verdicts_in_order[idx]
-                if verdict is None:
-                    # Still no match — surface what the model actually sent
-                    # back, including which provider answered, so a real
-                    # mismatch is diagnosable from the UI.
-                    got_ids = [str(v.get("rule_id", v.get("id", "?"))) for v in verdicts_in_order]
-                    diag = (
-                        f"LLM ({provider_used}) returned {len(verdicts_in_order)} verdict(s) for this "
-                        f"{len(batch)}-rule batch, none matching rule_id '{rule_id}' or index {idx}. "
-                        f"IDs seen: {got_ids[:8]}"
-                    )
-                    results.append(self._llm_finding(
-                        rule, status="WARN", observed=diag,
-                        reasoning="", check_source="llm_error",
-                    ))
-                    continue
-
-                status = str(verdict.get("status", "WARN")).upper()
-                if status not in ("PASS", "WARN", "FAIL"):
-                    status = "WARN"
-                evidence = str(verdict.get("evidence") or "").strip()
-                if not evidence:
-                    evidence = "Not found" if status == "FAIL" else "LLM gave a verdict but no supporting evidence text."
+        except (LLMProviderError, ValueError) as exc:
+            # Providers failed, response empty, or invalid JSON — return WARN for all rules
+            for rule in candidate_rules:
                 results.append(self._llm_finding(
-                    rule, status=status, observed=evidence,
-                    reasoning=verdict.get("reasoning", ""), check_source="llm",
+                    rule, status="WARN", observed=f"LLM check unavailable: {exc}",
+                    reasoning="", check_source="llm_error",
                 ))
+            return results
+
+        # Sanity check: the number of verdicts should match the number of rules
+        if len(verdicts_in_order) != len(candidate_rules):
+            diag = (
+                f"LLM ({provider_used}) returned {len(verdicts_in_order)} verdict(s) for a "
+                f"{len(candidate_rules)}-rule request — count mismatch suggests the response isn't "
+                f"tracking this prompt (stale/cached/unrelated response from the provider), "
+                f"not a dropped item. Raw response: {completion[:400]!r}"
+            )
+            for rule in candidate_rules:
+                results.append(self._llm_finding(
+                    rule, status="WARN", observed=diag,
+                    reasoning="", check_source="llm_error",
+                ))
+            return results
+
+        # Map each verdict back to its rule using rule_id, index, or response order
+        for idx, rule in enumerate(candidate_rules):
+            rule_id = str(rule.get("id", rule.get("check", "?")))
+            verdict = verdicts_by_id.get(rule_id)
+            if verdict is None:
+                verdict = verdicts_by_index.get(idx)
+            if verdict is None:
+                verdict = verdicts_in_order[idx]
+            if verdict is None:
+                got_ids = [str(v.get("rule_id", v.get("id", "?"))) for v in verdicts_in_order]
+                diag = (
+                    f"LLM ({provider_used}) returned {len(verdicts_in_order)} verdict(s) for this "
+                    f"{len(candidate_rules)}-rule batch, none matching rule_id '{rule_id}' or index {idx}. "
+                    f"IDs seen: {got_ids[:8]}"
+                )
+                results.append(self._llm_finding(
+                    rule, status="WARN", observed=diag,
+                    reasoning="", check_source="llm_error",
+                ))
+                continue
+
+            status = str(verdict.get("status", "WARN")).upper()
+            if status not in ("PASS", "WARN", "FAIL"):
+                status = "WARN"
+            evidence = str(verdict.get("evidence") or "").strip()
+            if not evidence:
+                evidence = "Not found" if status == "FAIL" else "LLM gave a verdict but no supporting evidence text."
+            results.append(self._llm_finding(
+                rule, status=status, observed=evidence,
+                reasoning=verdict.get("reasoning", ""), check_source="llm",
+            ))
         return results
 
     # Rules per LLM call. Smaller batches -> faster, more reliable

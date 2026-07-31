@@ -4587,12 +4587,17 @@ async def validation_stage3_llm(
         only_ids = [s.strip() for s in only_rule_ids.split(",") if s.strip()]
 
     try:
+        print("BEFORE check_documents_with_llm")
         llm_results = agent.check_documents_with_llm(
             docs,
             stage="conceptual_soundness",
             only_rule_ids=only_ids,
             frameworks=selected_frameworks,
         )
+        print("========== LLM RESULTS DEBUG ==========")
+        print("LLM_RESULTS_COUNT:", len(llm_results))
+        print("LLM_RESULTS:", llm_results)
+        print("======================================")
     except Exception as e:
         import traceback
 

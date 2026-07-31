@@ -37,6 +37,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -131,7 +132,7 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self):
         self.base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-        self.model = os.environ.get("OLLAMA_MODEL", "llama3")
+        self.model = "llama3.2"
         self.timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180"))
 
     def complete(self, prompt: str) -> str:
@@ -143,23 +144,51 @@ class OllamaProvider(LLMProvider):
             # syntactically valid JSON output in this mode, which avoids
             # the truncated/empty-response failure mode of free-form
             # generation and is usually faster to converge on.
-            "format": "json",
+            "format": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "rule_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["PASS", "WARN", "FAIL"],
+                        },
+                        "evidence": {"type": "string"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["index", "rule_id", "status", "evidence", "reasoning"],
+                    "additionalProperties": False,
+                },
+            },
             # temperature 0 for deterministic, lower-latency decoding —
             # this is a rule-verdict task, not creative generation.
             "options": {"temperature": 0},
         }).encode("utf-8")
         headers = {"Content-Type": "application/json"}
 
+        prompt_preview = prompt[:100] + ("..." if len(prompt) > 100 else "")
         req = urllib.request.Request(f"{self.base_url}/api/generate", data=payload, headers=headers, method="POST")
         try:
+            start = time.time()
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 if resp.status >= 400:
                     raise LLMProviderError(f"Ollama returned HTTP {resp.status}")
                 body = resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                pass
             raise LLMProviderError(f"Ollama HTTP error: {e.code} {e.reason}") from e
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
             raise LLMProviderError(f"Ollama unreachable: {e}") from e
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
 
         try:
             data = json.loads(body)
@@ -189,7 +218,8 @@ def complete_with_fallback(prompt: str) -> tuple[str, str]:
 
     ollama = OllamaProvider()
     try:
-        return ollama.complete(prompt), ollama.name
+        result = ollama.complete(prompt), ollama.name
+        return result
     except LLMProviderError as e:
         errors.append(str(e))
 
