@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { Button } from "@/components/ui/button";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/data-upload")({
   head: () => ({ meta: [{ title: "Data Upload — Aegis Credit" }] }),
@@ -64,8 +65,19 @@ function bestCandidate(candidates: JoinCandidate[], tableA: string, tableB: stri
 
 function DataUpload() {
 
-  const { setUploadResult, profile } = useDataset();
+  const { setUploadResult, setProfile, profile } = useDataset();
   const navigate = useNavigate();
+
+  // Resume where the reviewer left off: if nothing is currently loaded in
+  // this session, pull the last successfully saved /data/upload run from
+  // the backend's CSV log instead of showing a blank page.
+  const { data: resumedProfile } = useResumeState<Record<string, any>>("dev_pipeline_log.csv", "data_upload");
+  useEffect(() => {
+    if (!profile && resumedProfile) {
+      setProfile(resumedProfile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedProfile]);
 
   const customerInputRef = useRef<HTMLInputElement>(null);
   const dbInputRef = useRef<HTMLInputElement>(null);
