@@ -18,6 +18,7 @@ import {
   woeFeatureSummary,
   rowsToCsv,
 } from "@/lib/full-report";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 type FeatureImportanceRow = {
   Feature: string;
@@ -115,6 +116,16 @@ function Explainability() {
   const [data, setData] = useState<ExplainabilityResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Resume where the reviewer left off: if this session has no explainability
+  // result yet, pull the last saved /models/explain run from the backend.
+  const { data: resumedExplain } = useResumeState<ExplainabilityResponse>("dev_pipeline_log.csv", "explainability");
+  useEffect(() => {
+    if (!data && resumedExplain) {
+      setData(resumedExplain);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedExplain]);
 
   const [topN, setTopN] = useState(15);
   const [shapSamples, setShapSamples] = useState(150);

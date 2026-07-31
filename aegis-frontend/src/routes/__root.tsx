@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -11,6 +12,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "@/components/app-shell";
 import { DatasetProvider } from "@/lib/app-context";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
 
 function NotFoundComponent() {
   return (
@@ -102,11 +104,35 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <DatasetProvider>
-        <AppShell>
-          <Outlet />
-        </AppShell>
-      </DatasetProvider>
+      <AuthProvider>
+        <DatasetProvider>
+          <AuthGate>
+            <AppShell>
+              <Outlet />
+            </AppShell>
+          </AuthGate>
+        </DatasetProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
+}
+
+// Simple client-side gate: there's no real backend auth, so this just checks
+// whether a dummy user is stored (see lib/auth-context) and bounces anyone
+// who isn't "logged in" to /login. /login itself is always allowed through.
+function AuthGate({ children }: { children: ReactNode }) {
+  const { user, isHydrated } = useAuth();
+  const router = useRouter();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!user && pathname !== "/login") {
+      router.navigate({ to: "/login" });
+    }
+  }, [isHydrated, user, pathname, router]);
+
+  if (!isHydrated) return null;
+  if (!user && pathname !== "/login") return null;
+  return <>{children}</>;
 }

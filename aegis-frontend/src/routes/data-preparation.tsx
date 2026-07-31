@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeFeatureRemovalProposal } from "@/lib/feature-removal";
+import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/data-preparation")({
   head: () => ({ meta: [{ title: "Data Preparation & Feature Engineering — Aegis Credit" }] }),
@@ -762,6 +763,19 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
   const [preprocess, setPreprocess] = useState<any>(preprocessingResult ?? null);
   const [testSize, setTestSize] = useState(preprocessingResult?.split_config?.test_size ?? 0.15);
   const [valSize, setValSize] = useState(preprocessingResult?.split_config?.val_size ?? 0.15);
+
+  // Resume where the reviewer left off: if this session has no preprocessing
+  // result yet, pull the last saved /data/preprocess run from the backend.
+  const { data: resumedPreprocess } = useResumeState<Record<string, any>>("dev_pipeline_log.csv", "preprocessing");
+  useEffect(() => {
+    if (!preprocessingResult && resumedPreprocess) {
+      setPreprocessingResult(resumedPreprocess);
+      setPreprocess(resumedPreprocess);
+      setTestSize(resumedPreprocess?.split_config?.test_size ?? 0.15);
+      setValSize(resumedPreprocess?.split_config?.val_size ?? 0.15);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedPreprocess]);
   // Not user-configurable in the UI — hardcoded to match the backend default.
   // Stage 4's seed-stability check (R4.6) varies the seed programmatically via
   // its own control on the Model Validation screen, independent of this value.
@@ -1490,6 +1504,21 @@ function FeaturesSection() {
   const [engineeringResult, setEngineeringResult] = useState<FeatureEngineeringResponse | null>(
     (featureEngineeringResult as FeatureEngineeringResponse | null) ?? null,
   );
+
+  // Resume where the reviewer left off: if this session has no feature
+  // engineering result yet, pull the last saved /data/feature-engineering
+  // run from the backend.
+  const { data: resumedFeatures } = useResumeState<FeatureEngineeringResponse>(
+    "dev_pipeline_log.csv",
+    "feature_engineering",
+  );
+  useEffect(() => {
+    if (!featureEngineeringResult && resumedFeatures) {
+      setFeatureEngineeringResult(resumedFeatures as unknown as Record<string, any>);
+      setEngineeringResult(resumedFeatures);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumedFeatures]);
 
   const feRequestIdRef = useRef(0);
 

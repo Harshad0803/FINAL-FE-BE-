@@ -30,5 +30,8 @@ venv/
 # FRED API response cache (runtime data, not source)
 **/.fred_cache/
 
+# CSV-based pipeline run logs (runtime data, not source)
+24-06/app_data/
+
 # macOS Finder metadata
 **/.DS_Store

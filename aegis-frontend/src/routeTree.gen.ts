@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ActivityLogRouteImport } from './routes/activity-log'
 import { Route as ValidationRouteImport } from './routes/validation'
 import { Route as TrainingRouteImport } from './routes/training'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -16,6 +17,7 @@ import { Route as ProfilingRouteImport } from './routes/profiling'
 import { Route as PreprocessingRouteImport } from './routes/preprocessing'
 import { Route as PdRouteImport } from './routes/pd'
 import { Route as ModelTrainingEvaluationRouteImport } from './routes/model-training-evaluation'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as ExplainabilityRouteImport } from './routes/explainability'
 import { Route as EvaluationRouteImport } from './routes/evaluation'
@@ -33,6 +35,11 @@ import { Route as ValidationDataQualityRouteImport } from './routes/validation.d
 import { Route as ValidationConceptualRouteImport } from './routes/validation.conceptual'
 import { Route as ValidationChallengerRouteImport } from './routes/validation.challenger'
 
+const ActivityLogRoute = ActivityLogRouteImport.update({
+  id: '/activity-log',
+  path: '/activity-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ValidationRoute = ValidationRouteImport.update({
   id: '/validation',
   path: '/validation',
@@ -61,6 +68,11 @@ const PreprocessingRoute = PreprocessingRouteImport.update({
 const PdRoute = PdRouteImport.update({
   id: '/pd',
   path: '/pd',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeaturesRoute = FeaturesRouteImport.update({
@@ -151,12 +163,14 @@ const ValidationChallengerRoute = ValidationChallengerRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -176,12 +190,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -201,12 +217,14 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/activity-log': typeof ActivityLogRoute
   '/data-preparation': typeof DataPreparationRoute
   '/data-upload': typeof DataUploadRoute
   '/development': typeof DevelopmentRoute
   '/evaluation': typeof EvaluationRoute
   '/explainability': typeof ExplainabilityRoute
   '/features': typeof FeaturesRoute
+  '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
@@ -228,12 +246,14 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -253,12 +273,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -277,12 +299,14 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/activity-log'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
     | '/evaluation'
     | '/explainability'
     | '/features'
+    | '/login'
     | '/model-training-evaluation'
     | '/pd'
     | '/preprocessing'
@@ -303,12 +327,14 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActivityLogRoute: typeof ActivityLogRoute
   DataPreparationRoute: typeof DataPreparationRoute
   DataUploadRoute: typeof DataUploadRoute
   DevelopmentRoute: typeof DevelopmentRoute
   EvaluationRoute: typeof EvaluationRoute
   ExplainabilityRoute: typeof ExplainabilityRoute
   FeaturesRoute: typeof FeaturesRoute
+  LoginRoute: typeof LoginRoute
   ModelTrainingEvaluationRoute: typeof ModelTrainingEvaluationRoute
   PdRoute: typeof PdRoute
   PreprocessingRoute: typeof PreprocessingRoute
@@ -320,6 +346,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/activity-log': {
+      id: '/activity-log'
+      path: '/activity-log'
+      fullPath: '/activity-log'
+      preLoaderRoute: typeof ActivityLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/validation': {
       id: '/validation'
       path: '/validation'
@@ -360,6 +393,13 @@ declare module '@tanstack/react-router' {
       path: '/pd'
       fullPath: '/pd'
       preLoaderRoute: typeof PdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/features': {
@@ -514,12 +554,14 @@ const ValidationRouteWithChildren = ValidationRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActivityLogRoute: ActivityLogRoute,
   DataPreparationRoute: DataPreparationRoute,
   DataUploadRoute: DataUploadRoute,
   DevelopmentRoute: DevelopmentRoute,
   EvaluationRoute: EvaluationRoute,
   ExplainabilityRoute: ExplainabilityRoute,
   FeaturesRoute: FeaturesRoute,
+  LoginRoute: LoginRoute,
   ModelTrainingEvaluationRoute: ModelTrainingEvaluationRoute,
   PdRoute: PdRoute,
   PreprocessingRoute: PreprocessingRoute,

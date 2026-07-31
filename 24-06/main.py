@@ -81,6 +81,7 @@ from train_new import split_data, compute_split_stats, train_model
 import evaluate_new as eval_engine
 import fred_client
 import data_integration as di
+import persistence
 
 compute_binary_metrics = eval_engine.compute_binary_metrics
 compute_regression_metrics = eval_engine.compute_regression_metrics
@@ -471,7 +472,20 @@ async def save_intake_draft(payload: IntakeDraftRequest) -> Dict[str, Any]:
     saved_at = pd.Timestamp.now().isoformat()
     record = {"model_name": payload.model_name, "data": payload.data, "saved_at": saved_at}
     (INTAKE_DRAFTS_DIR / f"{slug}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
-    return {"saved": True, "model_name": payload.model_name, "saved_at": saved_at}
+
+    result = {"saved": True, "model_name": payload.model_name, "saved_at": saved_at}
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="intake",
+            payload={"model_name": payload.model_name},
+            full_payload={**result, "data": payload.data},
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log intake: {e}")
+
+    return result
 
 
 @app.get("/validation/intake/draft")
@@ -482,6 +496,26 @@ async def get_intake_draft(model_name: str) -> Dict[str, Any]:
         return {"found": False}
     record = json.loads(path.read_text(encoding="utf-8"))
     return {"found": True, **record}
+
+
+@app.get("/history/dev")
+async def history_dev() -> Dict[str, Any]:
+    return {"runs": persistence.read_log(persistence.DEV_PIPELINE_LOG)}
+
+
+@app.get("/history/validation")
+async def history_validation() -> Dict[str, Any]:
+    return {"runs": persistence.read_log(persistence.VALIDATION_PIPELINE_LOG)}
+
+
+@app.get("/history/artifact")
+async def history_artifact(log_file: str, run_id: str) -> Dict[str, Any]:
+    return {"artifact": persistence.get_artifact(log_file, run_id)}
+
+
+@app.get("/history/latest")
+async def history_latest(log_file: str, stage: str) -> Dict[str, Any]:
+    return {"latest": persistence.get_latest(log_file, stage)}
 
 
 @app.post("/data/feature-decision-log")
@@ -1063,6 +1097,19 @@ async def upload_data(
         profile["csv_text"] = df.to_csv(index=False)
         profile["source_type"] = "demo"
         profile["demo_mode"] = demo_mode
+        try:
+            persistence.log_event(
+                persistence.DEV_PIPELINE_LOG,
+                stage="data_upload",
+                payload={
+                    "filename": dataset_name,
+                    "row_count": int(df.shape[0]),
+                    "column_count": int(df.shape[1]),
+                },
+                full_payload=profile,
+            )
+        except Exception as e:
+            print(f"[persistence] failed to log data_upload: {e}")
         return profile
 
     df = await _read_dataframe(file=file, csv_text=csv_text, synthetic_samples=synthetic_samples)
@@ -1074,6 +1121,19 @@ async def upload_data(
         profile["synthetic_samples"] = int(synthetic_samples)
     else:
         profile["source_type"] = "file"
+    try:
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="data_upload",
+            payload={
+                "filename": dataset_name,
+                "row_count": int(df.shape[0]),
+                "column_count": int(df.shape[1]),
+            },
+            full_payload=profile,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log data_upload: {e}")
     return profile
 
 
@@ -1821,7 +1881,7 @@ async def preprocess_data(
         "ecl_only_cols_dropped": clean_info.get("ecl_only_cols_dropped", []),
     }
 
-    return {
+    result = {
         "col_types": col_types,
         "target_col": target_col,
         "feature_names": feature_names,
@@ -1858,6 +1918,24 @@ async def preprocess_data(
         "review_missing_threshold": REVIEW_MISSING_THRESHOLD,
         "original_dataset_csv": df.to_csv(index=False),
     }
+
+    try:
+        applied_steps = [t.get("treatment") for t in treatment_map.values()]
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="preprocessing",
+            payload={
+                "target_col": target_col,
+                "steps_applied": sorted(set(applied_steps)),
+                "dropped_columns": _drop_cols_present,
+                "resulting_x_shape": list(X_train.shape),
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log preprocessing: {e}")
+
+    return result
 
 
 @app.post("/data/drop-impact")
@@ -2019,7 +2097,7 @@ async def feature_engineering(
         "iv_scores": plan.get("iv_scores", {}),
     }
 
-    return {
+    result = {
         "col_types": col_types,
         "target_col": target_col,
         "task_type": task_type,
@@ -2043,6 +2121,23 @@ async def feature_engineering(
         "feature_scores": plan.get("feature_scores", {}),
         "transform_recommendations": plan.get("transform_recommendations", {}),
     }
+
+    try:
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="feature_engineering",
+            payload={
+                "target_col": target_col,
+                "features_added": plan.get("applied_steps", []),
+                "features_removed": dropped_features,
+                "final_feature_count": len(engineered_feature_names),
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log feature_engineering: {e}")
+
+    return result
 
 
 @app.post("/data/macro/date-columns")
@@ -2322,7 +2417,7 @@ async def train_model_endpoint(
         dates=dates_test, date_columns=[origination_date_col] if origination_date_col else [],
     )
 
-    return {
+    result = {
         "task_type": task_type,
         "model_name": model_name,
         "real_feature_names": real_feature_names,
@@ -2351,6 +2446,22 @@ async def train_model_endpoint(
         "evaluation_data": evaluation_data,
         "model_artifact": _to_base64(pipeline),
     }
+
+    try:
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="training",
+            payload={
+                "model_name": model_name,
+                "hyperparameters": manual_params_dict or {},
+                "metrics": metrics,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log training: {e}")
+
+    return result
 
 
 def _lighten_for_comparison(model, model_name: str, max_estimators: int = 100):
@@ -2505,10 +2616,22 @@ async def evaluate_model(
 
     # Same response shape as /models/train so callers can treat both
     # endpoints' evaluation payload identically.
-    return {
+    result = {
         "evaluation_metrics": metrics,
         "evaluation_data": evaluation_data,
     }
+
+    try:
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="evaluation",
+            payload={"evaluation_metrics": metrics},
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log evaluation: {e}")
+
+    return result
 
 
 @app.post("/models/explain")
@@ -2625,11 +2748,26 @@ async def explain_model(
             raise HTTPException(status_code=400, detail=f"metrics must be valid JSON: {exc}")
         summary_text = generate_model_summary(metrics_dict, importance_df, task_type or "binary")
 
-    return {
+    result = {
         "feature_importance": importance,
         "shap": shap_info,
         "summary": summary_text,
     }
+
+    try:
+        persistence.log_event(
+            persistence.DEV_PIPELINE_LOG,
+            stage="explainability",
+            payload={
+                "method": "shap" if shap_info.get("shap_available") else "feature_importance",
+                "compute_shap": compute_shap,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log explainability: {e}")
+
+    return result
 
 
 def _run_benchmark_comparison(
@@ -3049,7 +3187,7 @@ async def validation_performance(
         y_proba=y_proba_arr,
     )
 
-    return {
+    result = {
         "stage": "benchmarking",
         "report": {
             "metrics": metrics,
@@ -3057,6 +3195,22 @@ async def validation_performance(
             "benchmark": benchmark_payload,
         },
     }
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="benchmarking",
+            payload={
+                "model_name": model_name,
+                "metrics": metrics,
+                "champion_vs_challenger": benchmark_payload.get("status") if isinstance(benchmark_payload, dict) else None,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log benchmarking: {e}")
+
+    return result
 
 
 @app.post("/validation/compliance")
@@ -3248,7 +3402,7 @@ async def validation_replication(
 
     performance_report = _build_performance_report(df, result, intake_payload, mdd_text)
 
-    return {
+    response_payload = {
         "stage": "replication",
         "flags": flags,
         "report": {
@@ -3256,6 +3410,22 @@ async def validation_replication(
             **performance_report,
         },
     }
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="replication",
+            payload={
+                "model_name": resolved_model_name,
+                "metrics": performance_report.get("metrics"),
+                "flags": flags,
+            },
+            full_payload=response_payload,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log replication: {e}")
+
+    return response_payload
 
 
 @app.post("/validation/stage7/bias-check")
@@ -3307,6 +3477,22 @@ async def validation_stage7_bias_check(
         random_seed=random_seed,
         cv_folds=cv_folds,
     )
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="fair_lending_bias",
+            payload={
+                "model_name": resolved_model_name,
+                "protected_col": protected_col,
+                "success": result.get("success"),
+                "check": result.get("check"),
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log fair_lending_bias: {e}")
+
     return result
 
 
@@ -3363,7 +3549,22 @@ async def validation_stress_run(
     )
 
     suite = run_stress_suite(rep_result, val_df=df, freq_key=freq or "quarterly", date_col=date_col)
-    return {"stage": "stress", "report": suite}
+    result = {"stage": "stress", "report": suite}
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="stress_testing",
+            payload={
+                "model_name": resolved_model_name,
+                "scenarios": list(suite.keys()) if isinstance(suite, dict) else None,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log stress_testing: {e}")
+
+    return result
 
 
 @app.post("/validation/stress/shock")
@@ -3460,7 +3661,15 @@ async def validation_agent2(
         flags = [f.get("check_id") for f in report.get("all_findings", []) if f.get("status") == "FAIL"]
     except Exception:
         flags = []
-    return {"stage": "agent2", "flags": flags, "report": report}
+
+    result = {"stage": "agent2", "flags": flags, "report": report}
+
+    # No persistence logging here: the frontend never calls this endpoint
+    # (it uses /validation/stage8/findings instead, which is where
+    # stage="findings" is now logged). Left uninstrumented rather than
+    # removed since it's still a working endpoint.
+
+    return result
 
 
 _FRAMEWORK_DISPLAY = {
@@ -3954,6 +4163,19 @@ async def validation_stage3_run(
     mapped["llm_pending"] = bool(mdd_text)
     mapped["timestamp"] = pd.Timestamp.now().isoformat()
 
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="conceptual_soundness",
+            payload={
+                "summary": mapped.get("summary"),
+                "verdict": mapped.get("regulatoryAlignment", {}).get("verdict"),
+            },
+            full_payload=mapped,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log conceptual_soundness: {e}")
+
     return mapped
 
 
@@ -4229,7 +4451,7 @@ async def validation_stage8_findings(
         monitoring_frequency = "Semi-annually"
         revalidation_trigger = "Every 2 years (or triggered by model change)"
 
-    return {
+    result = {
         "findings": all_findings,
         "verdict": verdict,
         "verdict_desc": verdict_desc,
@@ -4243,6 +4465,23 @@ async def validation_stage8_findings(
         "stated_auc": stated_auc,
         "replicated_auc": rep_auc,
     }
+
+    try:
+        persistence.log_event(
+            persistence.VALIDATION_PIPELINE_LOG,
+            stage="findings",
+            payload={
+                "verdict": verdict,
+                "high_count": high_count,
+                "medium_count": medium_count,
+                "total_count": total_count,
+            },
+            full_payload=result,
+        )
+    except Exception as e:
+        print(f"[persistence] failed to log findings: {e}")
+
+    return result
 
 
 @app.post("/validation/stage2/llm-check")
