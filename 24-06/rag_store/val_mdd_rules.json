@@ -1,7 +1,7 @@
 [
   {
     "id": "V01",
-    "stage": "data_validation",
+    "stage": "data",
     "check_id_hint": "2.3",
     "check": "default_definition_documented",
     "severity": "high",
@@ -23,7 +23,7 @@
   },
   {
     "id": "V02",
-    "stage": "data_validation",
+    "stage": "data",
     "check_id_hint": "2.4",
     "check": "forward_looking_information_justified",
     "severity": "high",
@@ -45,7 +45,7 @@
   },
   {
     "id": "V03",
-    "stage": "data_validation",
+    "stage": "data",
     "check_id_hint": "2.5",
     "check": "observation_window_documented",
     "severity": "high",
@@ -67,7 +67,7 @@
   },
   {
     "id": "V04",
-    "stage": "data_validation",
+    "stage": "data",
     "check_id_hint": "2.6",
     "check": "sampling_methodology_documented",
     "severity": "medium",
@@ -89,7 +89,7 @@
   },
   {
     "id": "V05",
-    "stage": "data_validation",
+    "stage": "data",
     "check_id_hint": "2.8",
     "check": "target_leakage_addressed_in_mdd",
     "severity": "high",
@@ -111,7 +111,7 @@
   },
   {
     "id": "V06",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.0",
     "check": "model_purpose_documented",
     "severity": "high",
@@ -133,7 +133,7 @@
   },
   {
     "id": "V07",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.1",
     "check": "model_selection_rationale_documented",
     "severity": "high",
@@ -156,7 +156,7 @@
   },
   {
     "id": "V08",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.2",
     "check": "benchmarking_evidence_documented",
     "severity": "high",
@@ -179,7 +179,7 @@
   },
   {
     "id": "V09",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.x",
     "check": "assumptions_and_limitations_documented",
     "severity": "high",
@@ -201,7 +201,7 @@
   },
   {
     "id": "V10",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.x",
     "check": "sicr_criteria_documented",
     "severity": "high",
@@ -224,7 +224,7 @@
   },
   {
     "id": "V11",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.x",
     "check": "explainability_documented",
     "severity": "medium",
@@ -246,7 +246,7 @@
   },
   {
     "id": "V12",
-    "stage": "conceptual_soundness",
+    "stage": "conceptual",
     "check_id_hint": "3.x",
     "check": "model_governance_documented",
     "severity": "medium",
@@ -263,6 +263,71 @@
       "review",
       "inventory",
       "escalation"
+    ],
+    "min_keyword_hits": 2
+  },
+  {
+    "id": "V13",
+    "stage": "conceptual_soundness",
+    "check_id_hint": "3.x",
+    "check": "guidance_on_regulatory_principles_for_model_risk_management_2026_chapter_iv_section_26_1",
+    "severity": "high",
+    "source": "RBI MRM Guidelines",
+    "principle": "Guidance on Regulatory Principles for Model Risk Management, 2026, Chapter – IV, Section 26(1)",
+    "rule": "The MDD must document the rationale and objectives for using the model, clearly defining its scope of application before development begins.",
+    "flag": "MDD missing required documentation: The MDD must document the rationale and objectives for using the model, clearly ",
+    "suggestion": "Add a 'Model Definition and Business Objectives' section to the MDD.",
+    "mdd_section_hint": "Model Definition and Business Objectives",
+    "keywords": [
+      "model objectives",
+      "rationale",
+      "scope",
+      "application",
+      "intended use"
+    ],
+    "min_keyword_hits": 2
+  },
+  {
+    "id": "V14",
+    "stage": "conceptual_soundness",
+    "check_id_hint": "3.x",
+    "check": "guidance_on_regulatory_principles_for_model_risk_management_2026_chapter_iv_section_26_2",
+    "severity": "high",
+    "source": "RBI MRM Guidelines",
+    "principle": "Guidance on Regulatory Principles for Model Risk Management, 2026, Chapter – IV, Section 26(2)",
+    "rule": "The MDD must document the consideration of costs and benefits associated with the model, including risks, adverse outcomes, fairness, ethical considerations, and potential bias.",
+    "flag": "MDD missing required documentation: The MDD must document the consideration of costs and benefits associated with th",
+    "suggestion": "Add a 'Model Selection and Rationale' section to the MDD.",
+    "mdd_section_hint": "Model Selection and Rationale",
+    "keywords": [
+      "cost-benefit analysis",
+      "ethical considerations",
+      "bias",
+      "fairness",
+      "risks",
+      "adverse outcomes"
+    ],
+    "min_keyword_hits": 2
+  },
+  {
+    "id": "V15",
+    "stage": "conceptual_soundness",
+    "check_id_hint": "3.x",
+    "check": "guidance_on_regulatory_principles_for_model_risk_management_2026_chapter_iv_section_27",
+    "severity": "high",
+    "source": "RBI MRM Guidelines",
+    "principle": "Guidance on Regulatory Principles for Model Risk Management, 2026, Chapter – IV, Section 27",
+    "rule": "The MDD must demonstrate that the model design and methodology follow a structured process aligned with intended use, covering data preprocessing, assumption assessment, limitations, and performance evaluation.",
+    "flag": "MDD missing required documentation: The MDD must demonstrate that the model design and methodology follow a structur",
+    "suggestion": "Add a 'Model Design and Methodology' section to the MDD.",
+    "mdd_section_hint": "Model Design and Methodology",
+    "keywords": [
+      "structured process",
+      "data preprocessing",
+      "model design",
+      "assumptions",
+      "limitations",
+      "performance evaluation"
     ],
     "min_keyword_hits": 2
   }

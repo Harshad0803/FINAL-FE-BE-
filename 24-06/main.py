@@ -109,8 +109,8 @@ from val_replication_core import (
 )
 from validation_stress_core import run_stress_suite, run_manual_shock
 
-_validation_agent2_path = SOURCE_OF_TRUTH_DIR / "validation_agent2.py"
-_validation_agent2_spec = importlib.util.spec_from_file_location("source_validation_agent2", _validation_agent2_path)
+_validation_agent2_path = BACKEND_DIR / "validation_agent2.py"
+_validation_agent2_spec = importlib.util.spec_from_file_location("validation_agent2", _validation_agent2_path)
 if _validation_agent2_spec is None or _validation_agent2_spec.loader is None:
     raise ImportError(f"Could not load ValidationAgent2 from {_validation_agent2_path}")
 _validation_agent2_module = importlib.util.module_from_spec(_validation_agent2_spec)
@@ -128,14 +128,7 @@ STAGING_KEYWORDS = ["stage 1", "stage 2", "stage 3", "staging", "sicr", "lifetim
 # check_for_validation / check_mdd_keywords / check_documents_with_llm). This is a
 # different class from the local `Agent2` above (24-06/agent2.py, rag_store/rules.json)
 # which only handles Stage 1/2/4/5 compliance flags and has no RAG rule methods.
-_source_agent2_path = SOURCE_OF_TRUTH_DIR / "agent2.py"
-_source_agent2_spec = importlib.util.spec_from_file_location("source_agent2", _source_agent2_path)
-if _source_agent2_spec is None or _source_agent2_spec.loader is None:
-    raise ImportError(f"Could not load source Agent2 from {_source_agent2_path}")
-_source_agent2_module = importlib.util.module_from_spec(_source_agent2_spec)
-_source_agent2_spec.loader.exec_module(_source_agent2_module)
-SourceAgent2 = _source_agent2_module.Agent2
-_rule_matches_frameworks = _source_agent2_module._rule_matches_frameworks
+from source_agent2 import Agent2 as SourceAgent2, _rule_matches_frameworks
 
 
 app = FastAPI()
@@ -604,12 +597,9 @@ class TierRequest(BaseModel):
 
 _agent2: Optional[Agent2] = None
 _source_agent2: Optional["SourceAgent2"] = None
-# The local 24-06/rag_store/val_mdd_rules.json copy is stale (pre-dates the
-# "conceptual_soundness"/"data_validation" stage-name rename in the rules'
-# `stage` field, still has the old "conceptual"/"data" short forms), which
-# silently makes check_mdd_keywords()/check_for_validation() match zero rules.
-# Load from the source-of-truth copy instead, same as ValidationAgent2 above.
-VAL_MDD_RULES_PATH = SOURCE_OF_TRUTH_DIR / "rag_store" / "val_mdd_rules.json"
+# Use the local runtime rule store for the 24-06 backend so the validation
+# workflow resolves the same ruleset regardless of the source-of-truth tree.
+VAL_MDD_RULES_PATH = BACKEND_DIR / "rag_store" / "val_mdd_rules.json"
 
 
 def _load_agent2() -> Optional[Agent2]:
