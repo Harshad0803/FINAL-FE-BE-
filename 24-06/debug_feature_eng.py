@@ -34,7 +34,7 @@ curr_utils = load_module("curr_utils", "utils.py")
 
 # Load and prepare data
 print("Loading demo data...")
-df = pd.read_csv("Credit-Risk-Poc-main/demo_data/clean_portfolio.csv")
+df = pd.read_csv(Path(__file__).resolve().parent / "demo_data" / "clean_portfolio.csv")
 print(f"Raw shape: {df.shape}")
 
 print("\n" + "="*80)

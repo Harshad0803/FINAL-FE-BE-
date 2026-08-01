@@ -1,0 +1,18 @@
+{
+  "model": "LightGBM",
+  "n_estimators": 500,
+  "max_depth": 4,
+  "learning_rate": 0.01,
+  "subsample": 0.9,
+  "colsample_bytree": 0.8,
+  "min_child_weight": 5,
+  "num_leaves": 31,
+  "feature_importances": {
+    "credit_score": 0.35,
+    "debt_to_income": 0.22,
+    "num_late_payments": 0.18,
+    "income": 0.13,
+    "loan_amount": 0.08,
+    "age": 0.04
+  }
+}

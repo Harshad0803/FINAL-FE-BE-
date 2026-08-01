@@ -1,0 +1,18 @@
+{
+  "model": "XGBoost",
+  "n_estimators": 50,
+  "max_depth": 3,
+  "learning_rate": 0.1,
+  "subsample": 0.8,
+  "colsample_bytree": 0.7,
+  "min_child_weight": 1,
+  "scale_pos_weight": 10,
+  "feature_importances": {
+    "income": 0.45,
+    "loan_amount": 0.30,
+    "age": 0.08,
+    "loan_term": 0.07,
+    "debt_to_income": 0.06,
+    "num_late_payments": 0.04
+  }
+}

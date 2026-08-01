@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple, Union
 
 BACKEND_DIR = Path(__file__).resolve().parent
-SOURCE_OF_TRUTH_DIR = Path(__file__).resolve().parent.parent / "Credit-Risk-Poc-main"
+SOURCE_OF_TRUTH_DIR = BACKEND_DIR
 for path in [BACKEND_DIR, SOURCE_OF_TRUTH_DIR]:
     path_str = str(path)
     if path_str not in sys.path:

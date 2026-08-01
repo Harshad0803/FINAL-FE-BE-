@@ -27,7 +27,7 @@ legacy_spec = importlib.util.spec_from_file_location("legacy_eval", ROOT / "eval
 legacy_eval = importlib.util.module_from_spec(legacy_spec)
 legacy_spec.loader.exec_module(legacy_eval)
 
-sample = pd.read_csv(ROOT.parent / "Credit-Risk-Poc-main" / "demo_data" / "clean_portfolio.csv")
+sample = pd.read_csv(ROOT / "demo_data" / "clean_portfolio.csv")
 target_col = "default"
 col_types = detect_column_types(sample)
 X_all, y_all, _, prep_report, _ = prepare_data(sample, col_types, target_col)

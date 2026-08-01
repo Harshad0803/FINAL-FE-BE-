@@ -1,0 +1,41 @@
+Purpose and Intended Use: This model estimates probability of
+        default for retail unsecured loans. Scope is limited to personal
+        loan portfolio.
+        Methodology: XGBoost algorithm selected after comparison with
+        logistic regression baseline. SMOTE oversampling applied for
+        class imbalance combined with class weighting. Hyperparameter
+        tuning via RandomizedSearchCV. Calibrated via Platt scaling
+        through the cycle TTC calibration.
+        Data: Internal dataset January 2015 to December 2023, 5000
+        observations covering COVID-19 stress period. Default definition
+        90 days past due per IFRS 9 B5.5.28 and CRR Article 178.
+        Stratified random sample across origination vintages. Survivorship
+        bias addressed by retaining closed and charged-off accounts.
+        No time-period bias identified. Selection bias reviewed.
+        Feature transformations: log transform of loan_amount, quantile
+        binning of credit_score, WOE weight of evidence encoding,
+        standard scaling. All transformations documented in Appendix B.
+        Forward-looking macro scenarios: baseline 50 percent, upside
+        25 percent, downside 25 percent defined over GDP growth and
+        unemployment rate. Probability-weighted ECL.
+        Features: credit_score, debt_to_income_ratio, loan_amount,
+        employment_length, num_credit_lines, gdp_growth,
+        unemployment_rate. Variable selection via information value
+        IV greater than 0.02.
+        Assumptions: LGD fixed at 45 percent Basel II floor. TTC
+        calibration applied. No post-default information used as
+        predictor. All predictors observable at origination.
+        Limitations: POC dataset. Macro scenario weights are
+        illustrative.
+        Performance: ROC-AUC: 0.82, Gini: 0.64, KS Statistic: 0.58,
+        CV Mean AUC: 0.80, Accuracy: 0.85, Precision: 0.72,
+        Recall: 0.71, F1 Score: 0.72, Brier Score: 0.16.
+        Governance: SMF holder Jane Smith. Model inventory registered.
+        Independence confirmed — validation team had no involvement in
+        model development. Version history maintained from v1.0.
+        Governance approved by Model Risk Committee MRC June 2026.
+        Operating boundaries: score range 0 to 1. Input domain:
+        retail unsecured loans UK only. Extrapolation risk documented.
+        Bias and fairness evaluation performed. No material
+        discriminatory bias identified across age and employment groups.
+        Version v2.1.0 change log maintained.

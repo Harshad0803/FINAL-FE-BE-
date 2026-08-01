@@ -2,9 +2,10 @@
 Direct comparison of engineered features between original and current
 """
 import sys
+from pathlib import Path
 import pandas as pd
 
-test_csv = "../Credit-Risk-Poc-main/demo_data/clean_portfolio.csv"
+test_csv = Path(__file__).resolve().parent / "demo_data" / "clean_portfolio.csv"
 target_col = "default"
 
 print(f"Loading {test_csv}...")

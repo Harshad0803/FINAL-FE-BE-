@@ -1,0 +1,11 @@
+Model: XGBoost Credit Default Classifier
+Owner: Risk Analytics Team
+Version: 1.0
+Date: 2023-12-01
+
+We trained an XGBoost model on internal loan data to predict default.
+Standard preprocessing was applied. The model uses applicant and loan features.
+Performance: ROC-AUC: 0.78, Gini: 0.56, KS Statistic: 0.48,
+CV Mean AUC: 0.73, Accuracy: 0.79, Precision: 0.61,
+Recall: 0.72, F1 Score: 0.65.
+Model is suitable for credit decisioning purposes.

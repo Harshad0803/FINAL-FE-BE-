@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 
 # Test data path
-test_csv = "../Credit-Risk-Poc-main/demo_data/clean_portfolio.csv"
+test_csv = Path(__file__).resolve().parent / "demo_data" / "clean_portfolio.csv"
 target_col = "default"
 
 print(f"Loading {test_csv}...")

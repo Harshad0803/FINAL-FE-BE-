@@ -26,7 +26,7 @@ cur_preproc = load_module_from_path('cur_preproc', os.path.join(CURRENT_ROOT, 'p
 cur_fe = load_module_from_path('cur_fe', os.path.join(CURRENT_ROOT, 'feature_engineering.py'))
 cur_utils = load_module_from_path('cur_utils', os.path.join(CURRENT_ROOT, 'utils.py'))
 
-csv_path = os.path.join('..', 'Credit-Risk-Poc-main', 'demo_data', 'clean_portfolio.csv')
+csv_path = os.path.join(os.path.dirname(__file__), 'demo_data', 'clean_portfolio.csv')
 df = pd.read_csv(csv_path)
 
 target_col = 'default'
