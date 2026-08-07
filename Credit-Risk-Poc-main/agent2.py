@@ -310,9 +310,9 @@ class Agent2:
         results: list[dict] = []
         try:
             prompt = self._build_llm_prompt(candidate_rules, doc_text)
-            print("[TRACE] About to call complete_with_fallback")
+            print("========== BEFORE OLLAMA ==========")
             completion, provider_used = complete_with_fallback(prompt)
-            print("[TRACE] Returned from complete_with_fallback")
+            print("========== AFTER OLLAMA ==========")
 
             verdicts_by_id, verdicts_by_index, verdicts_in_order = self._parse_llm_verdicts(completion)
 

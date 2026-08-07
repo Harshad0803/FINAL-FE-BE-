@@ -102,6 +102,7 @@ class DeloitteAgentProvider(LLMProvider):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        print(f"[OLLAMA DEBUG] base_url={self.base_url}")
         req = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -132,10 +133,11 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self):
         self.base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-        self.model = "llama3.2"
+        self.model = "llama3.2:3b"
         self.timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180"))
 
     def complete(self, prompt: str) -> str:
+        print("========== BEFORE OLLAMA ==========")
         payload = json.dumps({
             "model": self.model,
             "prompt": prompt,
@@ -169,6 +171,7 @@ class OllamaProvider(LLMProvider):
         headers = {"Content-Type": "application/json"}
 
         prompt_preview = prompt[:100] + ("..." if len(prompt) > 100 else "")
+        print(f"[OLLAMA DEBUG] base_url={self.base_url}, model={self.model}", flush=True)
         req = urllib.request.Request(f"{self.base_url}/api/generate", data=payload, headers=headers, method="POST")
         try:
             start = time.time()
@@ -190,6 +193,7 @@ class OllamaProvider(LLMProvider):
             traceback.print_exc()
             raise
 
+        print("========== AFTER OLLAMA ==========")
         try:
             data = json.loads(body)
         except json.JSONDecodeError:

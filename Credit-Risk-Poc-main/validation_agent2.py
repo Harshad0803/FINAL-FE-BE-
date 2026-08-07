@@ -775,6 +775,7 @@ class ValidationAgent2:
     # ── Stage 3: Conceptual Soundness ─────────────────────────────────────────
 
     def check_conceptual_soundness(self) -> list:
+        print("========== AGENT2 START ==========")
         findings = []
         df = self.val_df
         ij = self.intake_json

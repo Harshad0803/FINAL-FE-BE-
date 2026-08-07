@@ -6,6 +6,8 @@
 const BASE_URL = import.meta.env.VITE_API_URL ?? "";
 // Default to local backend during development when VITE_API_URL is not set
 const EFFECTIVE_BASE = BASE_URL || "http://localhost:8000";
+console.log("VITE_API_URL =", import.meta.env.VITE_API_URL);
+console.log("EFFECTIVE_BASE =", EFFECTIVE_BASE);
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body?: unknown) {
