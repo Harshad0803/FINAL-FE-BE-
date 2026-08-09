@@ -643,7 +643,7 @@ function Performance() {
         </div>
       ) : null}
 
-      <div className="text-right">
+      <div className="sticky bottom-4 z-40 flex justify-end pr-4 md:pr-8">
         <Link
           to="/validation/stress"
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"

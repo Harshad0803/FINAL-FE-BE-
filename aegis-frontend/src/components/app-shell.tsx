@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   UploadCloud,
   Database,
@@ -131,7 +131,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isLoginPage = pathname === "/login";
   const strictWorkspace = resolveWorkspace(pathname);
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   // Remember whichever real workspace (development/validation) the user was
   // last in, so neutral pages like /settings — which aren't part of either
@@ -295,15 +296,26 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
               </button>
               {user && (
-                <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-2 pr-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md gradient-primary text-[11px] font-semibold text-primary-foreground">
-                    {initialsFromName(user.name)}
+                <>
+                  <button
+                    onClick={() => {
+                      logout();
+                      navigate({ to: "/login" });
+                    }}
+                    className="hidden items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:bg-accent sm:inline-flex"
+                  >
+                    Sign out
+                  </button>
+                  <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-2 pr-3">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md gradient-primary text-[11px] font-semibold text-primary-foreground">
+                      {initialsFromName(user.name)}
+                    </div>
+                    <div className="hidden text-left leading-tight sm:block">
+                      <div className="text-xs font-semibold">{user.name}</div>
+                      <div className="text-[10px] text-muted-foreground">{user.role ?? "Risk Validator"}</div>
+                    </div>
                   </div>
-                  <div className="hidden text-left leading-tight sm:block">
-                    <div className="text-xs font-semibold">{user.name}</div>
-                    <div className="text-[10px] text-muted-foreground">Risk Validator</div>
-                  </div>
-                </div>
+                </>
               )}
             </div>
           )}

@@ -8,12 +8,10 @@ Credit-Risk-Poc-main source-of-truth project.
 import base64
 import io
 import json
-import importlib.util
 import os
 import tempfile
 import random
 import re
-import sys
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -22,10 +20,6 @@ from typing import Any, Dict, Optional, List, Tuple, Union
 
 BACKEND_DIR = Path(__file__).resolve().parent
 SOURCE_OF_TRUTH_DIR = BACKEND_DIR
-for path in [BACKEND_DIR, SOURCE_OF_TRUTH_DIR]:
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0 if path == BACKEND_DIR else 1, path_str)
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,12 +34,7 @@ from sqlalchemy import text
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
 
-_local_agent2_spec = importlib.util.spec_from_file_location("local_agent2", Path(__file__).resolve().parent / "agent2.py")
-if _local_agent2_spec is None or _local_agent2_spec.loader is None:
-    raise ImportError("Could not load local Agent2 from 24-06/agent2.py")
-_local_agent2_module = importlib.util.module_from_spec(_local_agent2_spec)
-_local_agent2_spec.loader.exec_module(_local_agent2_module)
-Agent2 = _local_agent2_module.Agent2
+from agent2 import Agent2
 from build_rules import RULES_PATH
 
 from utils import (
@@ -61,18 +50,8 @@ from preprocessing_new import (
 )
 from feature_engineering import (
     analyze_for_feature_engineering, apply_feature_engineering,
-    compute_univariate_gini,
+    compute_univariate_gini, resolve_ead_configuration,
 )
-try:
-    from feature_engineering import resolve_ead_configuration
-except ImportError:
-    _legacy_fe_path = Path(__file__).resolve().parent / "feature_engineering.py"
-    _legacy_fe_spec = importlib.util.spec_from_file_location("legacy_feature_engineering", _legacy_fe_path)
-    if _legacy_fe_spec is None or _legacy_fe_spec.loader is None:
-        raise
-    _legacy_fe = importlib.util.module_from_spec(_legacy_fe_spec)
-    _legacy_fe_spec.loader.exec_module(_legacy_fe)
-    resolve_ead_configuration = _legacy_fe.resolve_ead_configuration
 from model_selector import (
     recommend_model, compute_dataset_characteristics, characteristics_from_summary,
     get_model_instance, get_hyperparameter_grid, CLASSIFICATION_MODELS,
@@ -93,6 +72,7 @@ compute_score_distribution = eval_engine.compute_score_distribution
 compute_gain_chart = eval_engine.compute_gain_chart
 compute_lift_chart = eval_engine.compute_lift_chart
 compute_temporal_analysis_bundle = eval_engine.compute_temporal_analysis_bundle
+compute_temporal_stability_summary = eval_engine.compute_temporal_stability_summary
 plot_roc_curve = eval_engine.plot_roc_curve
 plot_pr_curve = eval_engine.plot_pr_curve
 plot_confusion_matrix = eval_engine.plot_confusion_matrix
@@ -109,13 +89,7 @@ from val_replication_core import (
 )
 from validation_stress_core import run_stress_suite, run_manual_shock
 
-_validation_agent2_path = BACKEND_DIR / "validation_agent2.py"
-_validation_agent2_spec = importlib.util.spec_from_file_location("validation_agent2", _validation_agent2_path)
-if _validation_agent2_spec is None or _validation_agent2_spec.loader is None:
-    raise ImportError(f"Could not load ValidationAgent2 from {_validation_agent2_path}")
-_validation_agent2_module = importlib.util.module_from_spec(_validation_agent2_spec)
-_validation_agent2_spec.loader.exec_module(_validation_agent2_module)
-ValidationAgent2 = _validation_agent2_module.ValidationAgent2
+from validation_agent2 import ValidationAgent2
 # ValidationAgent2.check_regulatory_compliance() (SOURCE_OF_TRUTH_DIR's
 # validation_agent2.py) inlines these keyword lists as literal _mdd_contains()
 # args rather than module constants — mirrored here verbatim (lines ~1442,

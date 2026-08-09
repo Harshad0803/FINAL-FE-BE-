@@ -92,6 +92,14 @@ const metricDefinitions = [
   { key: "pr_auc", label: "PR-AUC", digits: 3 },
 ];
 
+const MODEL_OPTIONS = [
+  "Logistic Regression",
+  "Random Forest",
+  "XGBoost",
+  "LightGBM",
+  "Gradient Boosting",
+];
+
 function formatValue(value: unknown, digits = 3) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   const num = Number(value);
@@ -136,11 +144,10 @@ function ModelReplicationPanel({
   const [localFile, setLocalFile] = React.useState<File | null>(null);
   const [mddFile, setMddFile] = React.useState<File | null>(null);
   const [targetCol, setTargetCol] = React.useState("");
-  const [modelName, setModelName] = React.useState("");
+  const [modelName, setModelName] = React.useState("XGBoost");
   const [testSize, setTestSize] = React.useState(0.15);
   const [valSize, setValSize] = React.useState(0.15);
   const [reported, setReported] = React.useState<Record<string, string>>({});
-  const [availableModels, setAvailableModels] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // Seed from shared context so returning to this page (e.g. via Back from
@@ -201,17 +208,8 @@ function ModelReplicationPanel({
 
   const contextFileAvailable = Boolean(ds.file || profile?.csv_text || profile?.dataset_name || profile?.name);
   const resolvedAlgorithmName = React.useMemo(() => {
-    const fromIntake = typeof validationIntakeData?.algorithm === "string" ? validationIntakeData.algorithm.trim() : "";
-    if (fromIntake) return fromIntake;
-
-    const fromSelected = typeof selectedModelName === "string" ? selectedModelName.trim() : "";
-    if (fromSelected) return fromSelected;
-
-    const fromTraining = typeof trainingResult?.model_name === "string" ? trainingResult.model_name.trim() : "";
-    if (fromTraining) return fromTraining;
-
     return modelName.trim();
-  }, [modelName, selectedModelName, trainingResult?.model_name, validationIntakeData?.algorithm]);
+  }, [modelName]);
   const activeFile = React.useMemo<File | null>(() => {
     if (localFile) return localFile;
     if (ds.file) return ds.file;
@@ -226,17 +224,6 @@ function ModelReplicationPanel({
     return new File([csvText], safeName, { type: "text/csv" });
   }, [datasetName, ds.file, localFile, profile?.csv_text]);
 
-  // Fetch the classification model registry once for the datalist.
-  React.useEffect(() => {
-    const contextModels = [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]
-      .filter((value): value is string => Boolean(value))
-      .map((value) => String(value));
-
-    if (contextModels.length > 0) {
-      setAvailableModels((prev) => Array.from(new Set([...prev, ...contextModels])));
-    }
-  }, [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]);
-
   // Prefill from whatever the earlier stages already put in context, once.
   const prefilledRef = React.useRef(false);
   React.useEffect(() => {
@@ -247,9 +234,12 @@ function ModelReplicationPanel({
 
     if (targetCandidates[0]) setTargetCol(targetCandidates[0]);
 
-    const contextModelName = selectedModelName ?? trainingResult?.model_name ?? validationIntakeData?.model_name;
+    const contextModelName = [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim())
+      .find((value) => MODEL_OPTIONS.includes(value));
     if (contextModelName) {
-      setModelName(String(contextModelName));
+      setModelName(contextModelName);
     }
 
     if (trainingConfig) {
@@ -624,18 +614,17 @@ function ModelReplicationPanel({
 
         <div>
           <label className="text-xs font-medium text-muted-foreground">Model</label>
-          <input
-            list="replication-model-options"
+          <select
             value={modelName}
             onChange={(e) => setModelName(e.target.value)}
-            placeholder="e.g. xgboost"
             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-          />
-          <datalist id="replication-model-options">
-            {availableModels.map((m) => (
-              <option key={m} value={m} />
+          >
+            {MODEL_OPTIONS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
-          </datalist>
+          </select>
         </div>
 
         <div>

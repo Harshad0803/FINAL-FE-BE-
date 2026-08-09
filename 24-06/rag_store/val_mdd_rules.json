@@ -1,7 +1,7 @@
 [
   {
     "id": "V01",
-    "stage": "data",
+    "stage": "data_validation",
     "check_id_hint": "2.3",
     "check": "default_definition_documented",
     "severity": "high",
@@ -23,7 +23,7 @@
   },
   {
     "id": "V02",
-    "stage": "data",
+    "stage": "data_validation",
     "check_id_hint": "2.4",
     "check": "forward_looking_information_justified",
     "severity": "high",
@@ -45,7 +45,7 @@
   },
   {
     "id": "V03",
-    "stage": "data",
+    "stage": "data_validation",
     "check_id_hint": "2.5",
     "check": "observation_window_documented",
     "severity": "high",
@@ -67,7 +67,7 @@
   },
   {
     "id": "V04",
-    "stage": "data",
+    "stage": "data_validation",
     "check_id_hint": "2.6",
     "check": "sampling_methodology_documented",
     "severity": "medium",
@@ -89,7 +89,7 @@
   },
   {
     "id": "V05",
-    "stage": "data",
+    "stage": "data_validation",
     "check_id_hint": "2.8",
     "check": "target_leakage_addressed_in_mdd",
     "severity": "high",
@@ -111,7 +111,7 @@
   },
   {
     "id": "V06",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.0",
     "check": "model_purpose_documented",
     "severity": "high",
@@ -133,7 +133,7 @@
   },
   {
     "id": "V07",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.1",
     "check": "model_selection_rationale_documented",
     "severity": "high",
@@ -156,7 +156,7 @@
   },
   {
     "id": "V08",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.2",
     "check": "benchmarking_evidence_documented",
     "severity": "high",
@@ -179,7 +179,7 @@
   },
   {
     "id": "V09",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.x",
     "check": "assumptions_and_limitations_documented",
     "severity": "high",
@@ -201,7 +201,7 @@
   },
   {
     "id": "V10",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.x",
     "check": "sicr_criteria_documented",
     "severity": "high",
@@ -224,7 +224,7 @@
   },
   {
     "id": "V11",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.x",
     "check": "explainability_documented",
     "severity": "medium",
@@ -246,7 +246,7 @@
   },
   {
     "id": "V12",
-    "stage": "conceptual",
+    "stage": "conceptual_soundness",
     "check_id_hint": "3.x",
     "check": "model_governance_documented",
     "severity": "medium",

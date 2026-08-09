@@ -471,7 +471,12 @@ function DataQuality() {
                 if (!prev) return prev;
                 const byId = new Map(llmResp.llm_results.map((r) => [r.rule_id, r]));
                 const mergedRules = prev.ragRules.map((r) => byId.get(r.rule_id) ?? r);
-                const merged = { ...prev, ragRules: mergedRules, summary: deriveRuleSummary(mergedRules) };
+                const merged = {
+                  ...prev,
+                  ragRules: mergedRules,
+                  summary: deriveRuleSummary(mergedRules),
+                  llm_pending: false,
+                };
                 setValidationStage3Result(merged as unknown as Record<string, any>);
                 return merged;
               });
@@ -499,15 +504,35 @@ function DataQuality() {
   }, [datasetLoaded, file, profile?.csv_text]);
 
   const conceptualSummary = useMemo(() => {
+    // The Conceptual Soundness summary shown in the main summary card
+    // should reflect the 10 threshold checks only (Stage 3 quantitative
+    // checks). RAG/LLM rules are displayed separately in the RAG panel
+    // and must not inflate the main denominator while LLM review is
+    // pending or after it completes. Build the summary from
+    // `conceptualData.thresholdChecks` to avoid double-counting.
     if (!conceptualData) {
       return { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+    }
+
+    const checks = Array.isArray(conceptualData.thresholdChecks) ? conceptualData.thresholdChecks : [];
+    if (conceptualData.llm_pending) {
+      return { total: checks.length, pass: 0, warn: 0, fail: 0, pending: checks.length, na: 0 };
     }
 
     if (conceptualData.ragRules?.length) {
       return deriveRuleSummary(conceptualData.ragRules);
     }
 
-    return conceptualData.summary ?? { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+    const summary = { total: checks.length, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+    for (const c of checks) {
+      const st = (c.status || "").toUpperCase();
+      if (st === "PASS") summary.pass += 1;
+      else if (st === "WARN") summary.warn += 1;
+      else if (st === "FAIL") summary.fail += 1;
+      else if (st === "N/A" || st === "NA") summary.na += 1;
+      else summary.pending += 1;
+    }
+    return summary;
   }, [conceptualData]);
 
   return (

@@ -3,6 +3,7 @@ import React from "react";
 type AuthUser = {
   name: string;
   username: string;
+  role?: string | null;
 };
 
 type AuthState = {
@@ -49,13 +50,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Dummy authentication — there is no backend check here. Any non-empty
-  // username/password combination "logs in" the person and stores the
-  // display name derived from their username so it can be shown in the
-  // header. This exists purely to give the app a login screen, not to
-  // secure anything.
-  const login = React.useCallback((username: string, _password: string) => {
-    const nextUser: AuthUser = { name: toDisplayName(username), username: username.trim() };
+  // Demo authentication: accept any non-empty username and password and
+  // assign a persistent random demo role on login. The role is stored
+  // with the user in localStorage so it survives refresh but does not
+  // change on every navigation.
+  const DEMO_ROLES = [
+    "Risk Validator",
+    "Model Risk Analyst",
+    "Credit Risk Manager",
+    "Model Governance Analyst",
+  ];
+
+  const login = React.useCallback((username: string, password: string) => {
+    const uname = username.trim();
+    // Accept any non-empty username and password for demo; do not
+    // validate against hardcoded credentials.
+    if (!uname || !password) return;
+
+    // If a stored user already exists, preserve its role (don't re-randomize).
+    let assignedRole: string | null = null;
+    try {
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem(AUTH_STORAGE_KEY) : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as AuthUser | null;
+        if (parsed && parsed.role) assignedRole = parsed.role;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!assignedRole) {
+      // Pick a random role once at login.
+      assignedRole = DEMO_ROLES[Math.floor(Math.random() * DEMO_ROLES.length)];
+    }
+
+    const nextUser: AuthUser = { name: toDisplayName(uname), username: uname, role: assignedRole };
     setUser(nextUser);
     if (typeof window !== "undefined") {
       try {
