@@ -89,6 +89,106 @@ function buildValidationCsv(thresholdChecks: ThresholdCheck[], ragRules: RagRule
   return lines.join("\n");
 }
 
+function deriveRuleSummary(rules: RagRule[]) {
+  const summary = { total: rules.length, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+
+  for (const rule of rules) {
+    const effectiveStatus = ruleEffectiveStatus(rule).toUpperCase();
+    if (effectiveStatus === "PASS") {
+      summary.pass += 1;
+    } else if (effectiveStatus === "WARN") {
+      summary.warn += 1;
+    } else if (effectiveStatus === "FAIL") {
+      summary.fail += 1;
+    } else if (effectiveStatus === "N/A" || effectiveStatus === "NA") {
+      summary.na += 1;
+    } else {
+      summary.pending += 1;
+    }
+  }
+
+  return summary;
+}
+
+function shouldShowDataValidationTab(intakeData: Record<string, any> | null | undefined): boolean {
+  const frameworkValues = [
+    Array.isArray(intakeData?.frameworks) ? intakeData.frameworks : null,
+    Array.isArray(intakeData?.regulatory_frameworks) ? intakeData.regulatory_frameworks : null,
+  ].filter(Boolean) as unknown[][];
+
+  const normalized = frameworkValues.flatMap((values) =>
+    (values as Array<string | undefined | null>).flatMap((value) => {
+      if (typeof value !== "string") return [];
+      return [value.trim().toLowerCase()];
+    }),
+  );
+
+  const hasIfrs = normalized.some((value) => value.includes("ifrs"));
+  const hasSs = normalized.some((value) => value.includes("ss1") || value.includes("ss11"));
+  return hasIfrs || hasSs;
+}
+
+function getSelectedFrameworkLabels(intakeData: Record<string, any> | null | undefined): string[] {
+  const frameworkValues = [
+    Array.isArray(intakeData?.frameworks) ? intakeData.frameworks : null,
+    Array.isArray(intakeData?.regulatory_frameworks) ? intakeData.regulatory_frameworks : null,
+  ].filter(Boolean) as unknown[][];
+
+  const labels = frameworkValues.flatMap((values) =>
+    (values as Array<string | undefined | null>).flatMap((value) => {
+      if (typeof value !== "string") return [];
+
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+
+      const normalized = trimmed.toUpperCase();
+      if (normalized.includes("IFRS9") || normalized.includes("IFRS 9")) return ["IFRS 9"];
+      if (normalized.includes("IFRS7") || normalized.includes("IFRS 7")) return ["IFRS 7"];
+      if (normalized.includes("SS11")) return ["SS11/13"];
+      if (normalized.includes("SS1")) return ["SS1/23"];
+      if (normalized.includes("RBI")) return ["RBI MRM Guidelines"];
+      return [trimmed];
+    }),
+  );
+
+  return Array.from(new Set(labels));
+}
+
+function normalizeFrameworkForMatching(framework: string): string {
+  const normalized = framework.trim().toLowerCase();
+  if (normalized.includes("ifrs 9") || normalized.includes("ifrs9")) return "ifrs 9";
+  if (normalized.includes("ifrs 7") || normalized.includes("ifsr7") || normalized.includes("ifrs7")) return "ifrs 7";
+  if (normalized.includes("ss11") || normalized.includes("ss11/13") || normalized.includes("ss11-13")) return "ss11/13";
+  if (normalized.includes("ss1/23") || normalized.includes("ss1-23") || normalized.includes("ss123")) return "ss1/23";
+  if (normalized.includes("rbi") || normalized.includes("mrm")) return "rbi mrm guidelines";
+  return normalized;
+}
+
+function checkMatchesSelectedFrameworks(check: ThresholdCheck, selectedFrameworks: string[]): boolean {
+  if (!selectedFrameworks.length) return true;
+
+  const searchText = [check.title, check.source, check.principle, check.detail].filter(Boolean).join(" ").toLowerCase();
+
+  return selectedFrameworks.some((framework) => {
+    const normalizedFramework = normalizeFrameworkForMatching(framework);
+
+    switch (normalizedFramework) {
+      case "ifrs 9":
+        return /ifrs\s*9|ifrs9/.test(searchText);
+      case "ifrs 7":
+        return /ifrs\s*7|ifrs7/.test(searchText);
+      case "ss1/23":
+        return /ss1\s*(\/|-)\s*23|ss1\s*23|ss123/.test(searchText);
+      case "ss11/13":
+        return /ss11\s*(\/|-)\s*13|ss11\s*13|ss11/.test(searchText);
+      case "rbi mrm guidelines":
+        return /rbi|mrm/.test(searchText);
+      default:
+        return searchText.includes(normalizedFramework);
+    }
+  });
+}
+
 function DataQuality() {
   const {
     file,
@@ -112,6 +212,13 @@ function DataQuality() {
   // just advances to the second sub-tab) or the last one (Conceptual
   // Soundness — button actually navigates to Stage 3).
   const [activeTab, setActiveTab] = useState<string>("data-validation");
+  const showDataValidationTab = useMemo(() => shouldShowDataValidationTab(validationIntakeData), [validationIntakeData]);
+
+  useEffect(() => {
+    if (!showDataValidationTab && activeTab === "data-validation") {
+      setActiveTab("conceptual");
+    }
+  }, [showDataValidationTab, activeTab]);
 
   // ── Profile (charts: missing values, distribution, leakage) — unrelated to
   // the RAG check pipeline, kept as its own call against /data/profile. Shared
@@ -234,7 +341,7 @@ function DataQuality() {
                 if (!prev) return prev;
                 const byId = new Map(llmResp.llm_results.map((r) => [r.rule_id, r]));
                 const mergedRules = prev.ragRules.map((r) => byId.get(r.rule_id) ?? r);
-                return { ...prev, ragRules: mergedRules };
+                return { ...prev, ragRules: mergedRules, summary: deriveRuleSummary(mergedRules) };
               });
             })
             .catch((err) => {
@@ -259,7 +366,18 @@ function DataQuality() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetLoaded, file, profile?.csv_text]);
 
-  const summary = data?.summary ?? { total: 0, pass: 0, warn: 0, fail: 0 };
+  const summary = useMemo(() => {
+    if (!data) {
+      return { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+    }
+
+    if (data.ragRules?.length) {
+      return deriveRuleSummary(data.ragRules);
+    }
+
+    return data.summary ?? { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+  }, [data]);
+  const selectedFrameworkLabels = useMemo(() => getSelectedFrameworkLabels(validationIntakeData), [validationIntakeData]);
 
   const validationCsv = useMemo(() => buildValidationCsv(data?.thresholdChecks ?? [], data?.ragRules ?? []), [data]);
   const downloadValidationReport = () => {
@@ -353,7 +471,7 @@ function DataQuality() {
                 if (!prev) return prev;
                 const byId = new Map(llmResp.llm_results.map((r) => [r.rule_id, r]));
                 const mergedRules = prev.ragRules.map((r) => byId.get(r.rule_id) ?? r);
-                const merged = { ...prev, ragRules: mergedRules };
+                const merged = { ...prev, ragRules: mergedRules, summary: deriveRuleSummary(mergedRules) };
                 setValidationStage3Result(merged as unknown as Record<string, any>);
                 return merged;
               });
@@ -380,7 +498,17 @@ function DataQuality() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetLoaded, file, profile?.csv_text]);
 
-  const conceptualSummary = conceptualData?.summary ?? { total: 0, pass: 0, warn: 0, fail: 0 };
+  const conceptualSummary = useMemo(() => {
+    if (!conceptualData) {
+      return { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+    }
+
+    if (conceptualData.ragRules?.length) {
+      return deriveRuleSummary(conceptualData.ragRules);
+    }
+
+    return conceptualData.summary ?? { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
+  }, [conceptualData]);
 
   return (
     <div className="space-y-8">
@@ -399,7 +527,7 @@ function DataQuality() {
       ) : (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList>
-            <TabsTrigger value="data-validation">Data Validation</TabsTrigger>
+            {showDataValidationTab ? <TabsTrigger value="data-validation">Data Validation</TabsTrigger> : null}
             <TabsTrigger value="conceptual">Conceptual Soundness</TabsTrigger>
           </TabsList>
 
@@ -431,7 +559,11 @@ function DataQuality() {
                       <div className="text-xs text-muted-foreground">Quantitative checks against regulatory thresholds</div>
                     </div>
                     {data?.thresholdChecks && data.thresholdChecks.length > 0 ? (
-                      <ThresholdPanel checks={data.thresholdChecks} profileSource={validationProfile ?? profile} />
+                      <ThresholdPanel
+                        checks={data.thresholdChecks}
+                        profileSource={validationProfile ?? profile}
+                        selectedFrameworks={selectedFrameworkLabels}
+                      />
                     ) : (
                       <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
                         No threshold checks were returned for this stage.
@@ -450,7 +582,8 @@ function DataQuality() {
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Regulatory rules fetched from knowledge store (IFRS 9, SS11/13, SS1/23)
+                        Regulatory rules fetched from knowledge store
+                        {selectedFrameworkLabels.length > 0 ? ` (${selectedFrameworkLabels.join(", ")})` : ""}
                       </div>
                     </div>
                     {data?.ragRules && data.ragRules.length > 0 ? (
@@ -477,9 +610,9 @@ function DataQuality() {
                   {data?.regulatoryAlignment?.remediation_summary && (
                     <p className="mt-3 text-sm text-muted-foreground">{data.regulatoryAlignment.remediation_summary}</p>
                   )}
-                  {data?.regulatoryAlignment?.regulatory_references?.length ? (
+                  {selectedFrameworkLabels.length > 0 || data?.regulatoryAlignment?.regulatory_references?.length ? (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {data.regulatoryAlignment.regulatory_references.map((ref: string) => (
+                      {(selectedFrameworkLabels.length > 0 ? selectedFrameworkLabels : data?.regulatoryAlignment?.regulatory_references ?? []).map((ref: string) => (
                         <span
                           key={ref}
                           className="rounded-full border border-primary/20 bg-background px-3 py-1 text-xs font-medium text-foreground/80"
@@ -531,7 +664,11 @@ function DataQuality() {
                       <div className="text-xs text-muted-foreground">Quantitative checks against regulatory thresholds</div>
                     </div>
                     {conceptualData?.thresholdChecks && conceptualData.thresholdChecks.length > 0 ? (
-                      <ThresholdPanel checks={conceptualData.thresholdChecks} profileSource={validationProfile ?? profile} />
+                      <ThresholdPanel
+                        checks={conceptualData.thresholdChecks}
+                        profileSource={validationProfile ?? profile}
+                        selectedFrameworks={selectedFrameworkLabels}
+                      />
                     ) : (
                       <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
                         No threshold checks generated for this stage.
@@ -550,7 +687,8 @@ function DataQuality() {
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Regulatory rules fetched from knowledge store (SS1/23, SS11/13, IFRS 9)
+                        Regulatory rules fetched from knowledge store
+                        {selectedFrameworkLabels.length > 0 ? ` (${selectedFrameworkLabels.join(", ")})` : ""}
                       </div>
                     </div>
                     {conceptualData?.ragRules && conceptualData.ragRules.length > 0 ? (
@@ -577,9 +715,9 @@ function DataQuality() {
                   {conceptualData?.regulatoryAlignment?.remediation_summary && (
                     <p className="mt-3 text-sm text-muted-foreground">{conceptualData.regulatoryAlignment.remediation_summary}</p>
                   )}
-                  {conceptualData?.regulatoryAlignment?.regulatory_references?.length ? (
+                  {selectedFrameworkLabels.length > 0 || conceptualData?.regulatoryAlignment?.regulatory_references?.length ? (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {conceptualData.regulatoryAlignment.regulatory_references.map((ref: string) => (
+                      {(selectedFrameworkLabels.length > 0 ? selectedFrameworkLabels : conceptualData?.regulatoryAlignment?.regulatory_references ?? []).map((ref: string) => (
                         <span
                           key={ref}
                           className="rounded-full border border-primary/20 bg-background px-3 py-1 text-xs font-medium text-foreground/80"
@@ -900,11 +1038,34 @@ function ThresholdDetailPanel({ check, profileSource }: { check: ThresholdCheck;
   );
 }
 
-function ThresholdPanel({ checks, profileSource }: { checks: ThresholdCheck[]; profileSource: any }) {
+function ThresholdPanel({
+  checks,
+  profileSource,
+  selectedFrameworks = [],
+}: {
+  checks: ThresholdCheck[];
+  profileSource: any;
+  selectedFrameworks?: string[];
+}) {
   const statusRank: Record<string, number> = { FAIL: 0, WARN: 1, PASS: 2 };
-  const sorted = [...checks].sort((a, b) => (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3));
+  const filtered = useMemo(
+    () => checks.filter((check) => checkMatchesSelectedFrameworks(check, selectedFrameworks)),
+    [checks, selectedFrameworks],
+  );
+  const sorted = [...filtered].sort((a, b) => (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3));
   const [selectedId, setSelectedId] = useState<string | null>(sorted[0]?.check_id ?? null);
-  const selected = checks.find((c) => c.check_id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!sorted.some((check) => check.check_id === selectedId)) {
+      setSelectedId(sorted[0]?.check_id ?? null);
+    }
+  }, [selectedId, sorted]);
+
+  const selected = sorted.find((c) => c.check_id === selectedId) ?? null;
+
+  if (!sorted.length) {
+    return null;
+  }
 
   return (
     <div>
