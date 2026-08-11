@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { Button } from "@/components/ui/button";
-import { useResumeState } from "@/hooks/use-resume-state";
 
 export const Route = createFileRoute("/data-upload")({
   head: () => ({ meta: [{ title: "Data Upload — Aegis Credit" }] }),
@@ -63,27 +62,19 @@ function bestCandidate(candidates: JoinCandidate[], tableA: string, tableB: stri
       };
 }
 
+const SESSION_STORAGE_DATA_UPLOAD_KEY = "aegis_data_upload_active";
+
 function DataUpload() {
 
-  const { setUploadResult, setProfile, profile } = useDataset();
+  const { setUploadResult, profile } = useDataset();
   const navigate = useNavigate();
-
-  // Resume where the reviewer left off: if nothing is currently loaded in
-  // this session, pull the last successfully saved /data/upload run from
-  // the backend's CSV log instead of showing a blank page.
-  const { data: resumedProfile } = useResumeState<Record<string, any>>("dev_pipeline_log.csv", "data_upload");
-  useEffect(() => {
-    if (!profile && resumedProfile) {
-      setProfile(resumedProfile);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumedProfile]);
 
   const customerInputRef = useRef<HTMLInputElement>(null);
   const dbInputRef = useRef<HTMLInputElement>(null);
 
   const [customerFile, setCustomerFile] = useState<File | null>(null);
   const [customerColumns, setCustomerColumns] = useState<string[]>([]);
+  const [hasExplicitDataset, setHasExplicitDataset] = useState(false);
 
   const [dbFile, setDbFile] = useState<File | null>(null);
   const [dbTables, setDbTables] = useState<TableInfo[] | null>(null);
@@ -92,6 +83,35 @@ function DataUpload() {
 
   const [loanTable, setLoanTable] = useState<string>("");
   const [collateralTable, setCollateralTable] = useState<string>("");
+
+  const setExplicitDatasetActive = (active: boolean) => {
+    setHasExplicitDataset(active);
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem(SESSION_STORAGE_DATA_UPLOAD_KEY, active ? "1" : "0");
+      } catch {
+        // Ignore sessionStorage failures.
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = false;
+    try {
+      const persisted = window.sessionStorage.getItem(SESSION_STORAGE_DATA_UPLOAD_KEY);
+      active = persisted === "1";
+    } catch {
+      active = false;
+    }
+    setHasExplicitDataset(active);
+  }, []);
+
+  useEffect(() => {
+    if (!profile || hasExplicitDataset) return;
+    setUploadResult(null, null);
+    setExplicitDatasetActive(false);
+  }, [profile, hasExplicitDataset, setUploadResult]);
 
   // ── Macroeconomic data (FRED) ───────────────────────────────────────────────
   const [fredApiKey, setFredApiKey] = useState<string>("");
@@ -130,6 +150,7 @@ function DataUpload() {
     setMacroColumns([]);
     setMacroDateColUsed(null);
     setMacroError(null);
+    setHasExplicitDataset(true);
     try {
       setCustomerColumns(await readCsvHeader(f));
     } catch {
@@ -237,6 +258,7 @@ function DataUpload() {
     setDbError(null);
     setDbLoading(true);
     setReport(null);
+    setHasExplicitDataset(true);
     try {
       const form = new FormData();
       form.append("db_file", f);
@@ -326,6 +348,7 @@ function DataUpload() {
         ? new File([resp.csv_text], datasetName.endsWith(".csv") ? datasetName : `${datasetName}.csv`, { type: "text/csv" })
         : null;
       setUploadResult(resolvedFile, resp as any);
+      setExplicitDatasetActive(true);
     } catch (error: any) {
       setIntegrateError(error?.message ?? "Integration failed.");
     } finally {
@@ -613,7 +636,7 @@ function DataUpload() {
         </>
       ) : null}
 
-      {profile ? (
+      {hasExplicitDataset && profile ? (
         <>
           <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
             <div className="flex items-center gap-2">
