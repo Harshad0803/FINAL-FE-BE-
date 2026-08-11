@@ -1119,20 +1119,20 @@ def analyze_for_feature_engineering(
 
 def apply_feature_engineering(
     X: pd.DataFrame,
-    plan: Dict[str, Any],
+    plan_or_y: Any,
+    plan: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Apply a feature engineering plan to a feature matrix.
 
-    LEAKAGE FIX: this is now a PURE TRANSFORM. Every data-dependent quantity
-    (frequency maps, bin edges, WOE buckets + maps, fill medians, drop lists) is
-    read from `plan`, which was learned on X_train only. Nothing is recomputed
-    from `X`, so it produces identical, train-defined transformations whether `X`
-    is the train, validation or test split. The `y` argument has been removed
-    because supervised statistics must never be (re)learned at apply time.
+    This accepts both the current call form ``apply_feature_engineering(X, plan)``
+    and the legacy reference-style call ``apply_feature_engineering(X, y, plan)``.
+    The extra target argument is ignored because supervised statistics must never
+    be (re)learned at apply time.
 
     Returns (X_engineered, summary).
     """
+    plan = plan if plan is not None else plan_or_y
     X = X.copy()
     summary = {"added": [], "removed": [], "transformed": []}
     original_shape = X.shape

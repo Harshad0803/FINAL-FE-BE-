@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Boxes, ShieldCheck, Sparkles, BarChart3, FileCheck2, GitCompareArrows } from "lucide-react";
+import { ArrowRight, Boxes, ShieldCheck, Sparkles, BarChart3, FileCheck2, GitCompareArrows, Database } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -28,9 +28,9 @@ function Landing() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <WorkspaceCard
-          to="/data-upload"
+          to="/development"
           accent="from-primary/15 to-transparent"
           icon={<Boxes className="h-6 w-6 text-primary" />}
           eyebrow="Workspace 01"
@@ -55,6 +55,20 @@ function Landing() {
             { icon: <FileCheck2 className="h-3.5 w-3.5" />, label: "IFRS 9 / IFRS 7 / SS1/23 evidence pack" },
           ]}
           cta="Open Model Validation"
+        />
+
+        <WorkspaceCard
+          to="/model-inventory"
+          accent="from-primary/10 to-transparent"
+          icon={<Database className="h-6 w-6 text-primary" />}
+          eyebrow="Workspace 03"
+          title="Model Inventory"
+          description="Register models, attach data sources, track validation status, and export a governance-ready inventory."
+          bullets={[
+            { icon: <Database className="h-3.5 w-3.5" />, label: "Persistent model registry" },
+            { icon: <FileCheck2 className="h-3.5 w-3.5" />, label: "Excel export for consultant reviews" },
+          ]}
+          cta="Open Model Inventory"
         />
       </div>
     </div>

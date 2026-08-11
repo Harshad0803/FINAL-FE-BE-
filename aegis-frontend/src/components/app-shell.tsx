@@ -42,6 +42,11 @@ const developmentNav: NavItem[] = [
   { to: "/activity-log", label: "Activity Log", icon: History },
 ];
 
+const inventoryNav: NavItem[] = [
+  { to: "/model-inventory", label: "Model Inventory", icon: Database, exact: true },
+  { to: "/activity-log", label: "Activity Log", icon: History },
+];
+
 const validationNav: NavItem[] = [
   { to: "/validation/intake", label: "Intake & Governance", icon: FileText, exact: true },
   { to: "/validation/data-quality", label: "Data & Model Soundness", icon: Database },
@@ -58,14 +63,17 @@ const developmentPaths = [
   "/pd",
 ];
 
+const inventoryPaths = ["/model-inventory"];
+
 // Strict resolution from the URL alone — "/settings" isn't part of either
 // workspace's path list, so this correctly returns "landing" for it. The
 // component below layers last-known-workspace memory on top of this so
 // Settings (and any other neutral page) shows whichever workspace the user
 // was actually in, instead of always falling back to landing.
-function resolveWorkspace(pathname: string): "landing" | "development" | "validation" {
+function resolveWorkspace(pathname: string): "landing" | "development" | "validation" | "inventory" {
   if (pathname === "/") return "landing";
   if (pathname.startsWith("/validation")) return "validation";
+  if (inventoryPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) return "inventory";
   if (developmentPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) return "development";
   return "landing";
 }
@@ -138,13 +146,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   // last in, so neutral pages like /settings — which aren't part of either
   // workspace's own path list — can show that workspace's sidebar/toggle
   // instead of always falling back to the landing page's static CTAs.
-  const [lastWorkspace, setLastWorkspace] = useState<"development" | "validation">(() => {
+  const [lastWorkspace, setLastWorkspace] = useState<"development" | "validation" | "inventory">(() => {
     if (typeof window === "undefined") return "development";
-    return window.localStorage.getItem(LAST_WORKSPACE_KEY) === "validation" ? "validation" : "development";
+    const stored = window.localStorage.getItem(LAST_WORKSPACE_KEY);
+    return stored === "validation" || stored === "inventory" ? stored : "development";
   });
 
   useEffect(() => {
-    if (strictWorkspace === "development" || strictWorkspace === "validation") {
+    if (strictWorkspace === "development" || strictWorkspace === "validation" || strictWorkspace === "inventory") {
       setLastWorkspace(strictWorkspace);
       window.localStorage.setItem(LAST_WORKSPACE_KEY, strictWorkspace);
     }
@@ -156,9 +165,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isLanding = workspace === "landing" || isLoginPage;
   // Hide the shared model tabs on the Data Upload page per UX request
   const showModelTabs = workspace === "development" && pathname !== "/data-upload";
-  const nav = workspace === "validation" ? validationNav : developmentNav;
+  const nav = workspace === "validation" ? validationNav : workspace === "inventory" ? inventoryNav : developmentNav;
   const activeModelTab = resolveActiveModelTab(pathname);
-  const workspaceLabel = workspace === "validation" ? "Model Validation" : workspace === "development" ? "Model Development" : "Workspace";
+  const workspaceLabel = workspace === "validation"
+    ? "Model Validation"
+    : workspace === "development"
+    ? "Model Development"
+    : workspace === "inventory"
+    ? "Model Inventory"
+    : "Workspace";
 
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
@@ -194,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
               <div className="mt-3 grid grid-cols-2 gap-1.5">
                 <Link
-                  to="/data-upload"
+                  to="/development"
                   className={cn(
                     "rounded-md px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider transition-colors",
                     workspace === "development"
@@ -214,6 +229,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                   )}
                 >
                   Validate
+                </Link>
+                <Link
+                  to="/model-inventory"
+                  className={cn(
+                    "rounded-md px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider transition-colors",
+                    workspace === "inventory"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-sidebar-accent/40 text-sidebar-foreground/70 hover:bg-sidebar-accent",
+                  )}
+                >
+                  Inventory
                 </Link>
               </div>
             </div>
@@ -267,7 +293,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="ml-auto flex items-center gap-2">
               {isLanding && (
                 <Link
-                  to="/data-upload"
+                  to="/development"
                   className="hidden items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:border-primary/40 sm:inline-flex"
                 >
                   Develop

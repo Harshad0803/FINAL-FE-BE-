@@ -23,8 +23,21 @@ SOURCE_OF_TRUTH_DIR = BACKEND_DIR
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
+import pandas as pd
+import numpy as np
+import joblib
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix
+
+try:
+    from openpyxl import Workbook
+except Exception:  # pragma: no cover - environment fallback
+    Workbook = None
 import pandas as pd
 import numpy as np
 import joblib
@@ -90,6 +103,7 @@ from val_replication_core import (
 from validation_stress_core import run_stress_suite, run_manual_shock
 
 from validation_agent2 import ValidationAgent2
+_validation_agent2_path = BACKEND_DIR / "validation_agent2.py"
 # ValidationAgent2.check_regulatory_compliance() (SOURCE_OF_TRUTH_DIR's
 # validation_agent2.py) inlines these keyword lists as literal _mdd_contains()
 # args rather than module constants — mirrored here verbatim (lines ~1442,
@@ -106,6 +120,16 @@ from source_agent2 import Agent2 as SourceAgent2, _rule_matches_frameworks
 
 
 app = FastAPI()
+
+
+def resolve_replication_model_inputs(model_name: Optional[str], algorithm: Optional[str]) -> Tuple[str, str]:
+    """Separate the business model identity from the estimator used for training."""
+    business_model_name = (model_name or "").strip()
+    estimator_name = (algorithm or business_model_name or "").strip()
+    if not estimator_name:
+        raise ValueError("Model or algorithm is required.")
+    return business_model_name, estimator_name
+
 
 _ALLOWED_ORIGINS = [
     "http://192.168.1.19:3000",
@@ -326,10 +350,11 @@ def _build_validation_intake_snapshot(mode: str = "clean") -> Dict[str, Any]:
     except Exception:
         hyperparams = {}
 
+    mdd_document_path = f"demo_data/{demo_mode}_mdd.txt"
     return {
         "demo_mode": demo_mode,
         "demo_label": demo_label,
-        "val_intake_data": {**model_data, "mdd_text": mdd_text},
+        "val_intake_data": {**model_data, "mdd_text": mdd_text, "mdd_document_path": mdd_document_path},
         "val_mdd_text": mdd_text,
         "val_mdd_reported_metrics": reported_metrics,
         "val_hyperparams": hyperparams,
@@ -483,6 +508,241 @@ async def history_artifact(log_file: str, run_id: str) -> Dict[str, Any]:
 @app.get("/history/latest")
 async def history_latest(log_file: str, stage: str) -> Dict[str, Any]:
     return {"latest": persistence.get_latest(log_file, stage)}
+
+
+class InventoryModelRequest(BaseModel):
+    model_name: str
+    model_type: Optional[str] = None
+    business_purpose: Optional[str] = None
+    model_owner: Optional[str] = None
+    business_unit: Optional[str] = None
+    model_version: Optional[str] = None
+    regulatory_framework: Optional[str] = None
+    status: Optional[str] = None
+    development_date: Optional[str] = None
+    implementation_date: Optional[str] = None
+    last_validation_date: Optional[str] = None
+    next_validation_due: Optional[str] = None
+    model_risk_rating: Optional[str] = None
+    approval_status: Optional[str] = None
+    reviewer: Optional[str] = None
+    documentation_url: Optional[str] = None
+    documentation_path: Optional[str] = None
+    document_url: Optional[str] = None
+    document_path: Optional[str] = None
+
+
+class InventoryDataSourceRequest(BaseModel):
+    model_id: str
+    file_name: str
+    source_type: Optional[str] = "file"
+    purpose: Optional[str] = "Validation dataset"
+    uploaded_by: Optional[str] = "user"
+    uploaded_at: Optional[str] = None
+    record_count: Optional[int] = None
+    column_count: Optional[int] = None
+    target_variable: Optional[str] = None
+    storage_reference: Optional[str] = None
+
+
+class InventoryValidationRequest(BaseModel):
+    model_id: str
+    stage: str
+    status: str
+    findings_count: Optional[int] = None
+    last_run: Optional[str] = None
+    description: Optional[str] = None
+    user: Optional[str] = None
+
+
+@app.get("/model-inventory")
+async def get_model_inventory() -> Dict[str, Any]:
+    return persistence.ensure_model_inventory_seed()
+
+
+@app.get("/model-inventory/documentation")
+async def get_model_documentation(path: str) -> FileResponse:
+    if not path:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = BACKEND_DIR / candidate
+    normalized = candidate.resolve()
+    try:
+        normalized.relative_to(BACKEND_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid documentation path")
+    if not normalized.exists() or not normalized.is_file():
+        raise HTTPException(status_code=404, detail="Documentation not found")
+    return FileResponse(normalized, filename=normalized.name)
+
+
+@app.post("/model-inventory/models")
+async def create_inventory_model(payload: InventoryModelRequest) -> Dict[str, Any]:
+    store = persistence.ensure_model_inventory_seed()
+    model_id = persistence.next_model_id(store)
+    now = pd.Timestamp.now().isoformat()
+    entry = {
+        "model_id": model_id,
+        "model_name": payload.model_name,
+        "model_type": payload.model_type or "Custom",
+        "business_purpose": payload.business_purpose or "Consultant demo model",
+        "model_owner": payload.model_owner or "TBD",
+        "business_unit": payload.business_unit or "Risk",
+        "model_version": payload.model_version or "1.0",
+        "regulatory_framework": payload.regulatory_framework or "Internal",
+        "status": payload.status or "Draft",
+        "development_date": payload.development_date or now.split("T", 1)[0],
+        "implementation_date": payload.implementation_date,
+        "last_validation_date": payload.last_validation_date,
+        "next_validation_due": payload.next_validation_due,
+        "model_risk_rating": payload.model_risk_rating or "Medium",
+        "approval_status": payload.approval_status or "Draft",
+        "reviewer": payload.reviewer or "TBD",
+        "documentation_url": payload.documentation_url,
+        "documentation_path": payload.documentation_path,
+        "document_url": payload.document_url,
+        "document_path": payload.document_path,
+        "created_at": now,
+        "updated_at": now,
+    }
+    store.setdefault("models", []).append(entry)
+    persistence.append_history_event(store, model_id, "Model Registered", f"Model {payload.model_name} was added to the inventory.", user=payload.model_owner or "user")
+    persistence.save_model_inventory(store)
+    return entry
+
+
+@app.put("/model-inventory/models/{model_id}")
+async def update_inventory_model(model_id: str, payload: InventoryModelRequest) -> Dict[str, Any]:
+    store = persistence.ensure_model_inventory_seed()
+    model_entry = next((item for item in store.setdefault("models", []) if item.get("model_id") == model_id), None)
+    if model_entry is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    for field, value in payload.dict().items():
+        if value is not None:
+            model_entry[field] = value
+    model_entry["updated_at"] = pd.Timestamp.now().isoformat()
+    persistence.save_model_inventory(store)
+    return model_entry
+
+
+@app.post("/model-inventory/data-sources")
+async def create_inventory_data_source(payload: InventoryDataSourceRequest) -> Dict[str, Any]:
+    store = persistence.ensure_model_inventory_seed()
+    entry = persistence.create_data_source(store, payload.model_id, payload.dict())
+    persistence.save_model_inventory(store)
+    return entry
+
+
+@app.post("/model-inventory/validation")
+async def update_inventory_validation(payload: InventoryValidationRequest) -> Dict[str, Any]:
+    store = persistence.ensure_model_inventory_seed()
+    entry = persistence.update_model_validation_status(
+        store,
+        payload.model_id,
+        payload.stage,
+        payload.status,
+        findings_count=payload.findings_count,
+        last_run=payload.last_run,
+        description=payload.description,
+        user=payload.user,
+    )
+    persistence.save_model_inventory(store)
+    return entry
+
+
+@app.get("/model-inventory/export")
+async def export_model_inventory() -> StreamingResponse:
+    if Workbook is None:
+        raise HTTPException(status_code=500, detail="openpyxl is not available for Excel export")
+
+    store = persistence.ensure_model_inventory_seed()
+    output = io.BytesIO()
+    wb = Workbook()
+    ws_models = wb.active
+    ws_models.title = "Models"
+    ws_models.append([
+        "model_id",
+        "model_name",
+        "model_type",
+        "status",
+        "business_purpose",
+        "model_owner",
+        "business_unit",
+        "model_version",
+        "regulatory_framework",
+        "model_risk_rating",
+        "approval_status",
+        "reviewer",
+        "last_validation_date",
+        "next_validation_due",
+        "created_at",
+        "updated_at",
+    ])
+    for model in store.get("models", []):
+        ws_models.append([
+            model.get("model_id"),
+            model.get("model_name"),
+            model.get("model_type"),
+            model.get("status"),
+            model.get("business_purpose"),
+            model.get("model_owner"),
+            model.get("business_unit"),
+            model.get("model_version"),
+            model.get("regulatory_framework"),
+            model.get("model_risk_rating"),
+            model.get("approval_status"),
+            model.get("reviewer"),
+            model.get("last_validation_date"),
+            model.get("next_validation_due"),
+            model.get("created_at"),
+            model.get("updated_at"),
+        ])
+
+    ws_sources = wb.create_sheet("Data Sources")
+    ws_sources.append(["data_source_id", "model_id", "file_name", "source_type", "purpose", "uploaded_by", "uploaded_at", "record_count", "column_count", "target_variable", "storage_reference"])
+    for source in store.get("data_sources", []):
+        ws_sources.append([
+            source.get("data_source_id"),
+            source.get("model_id"),
+            source.get("file_name"),
+            source.get("source_type"),
+            source.get("purpose"),
+            source.get("uploaded_by"),
+            source.get("uploaded_at"),
+            source.get("record_count"),
+            source.get("column_count"),
+            source.get("target_variable"),
+            source.get("storage_reference"),
+        ])
+
+    ws_validation = wb.create_sheet("Validation")
+    ws_validation.append(["model_id", "data_validation_status", "conceptual_soundness_status", "backtesting_status", "overall_status", "findings_count", "last_validation"])
+    for item in store.get("validation", []):
+        ws_validation.append([
+            item.get("model_id"),
+            item.get("data_validation_status"),
+            item.get("conceptual_soundness_status"),
+            item.get("backtesting_status"),
+            item.get("overall_status"),
+            item.get("findings_count"),
+            item.get("last_validation"),
+        ])
+
+    ws_history = wb.create_sheet("History")
+    ws_history.append(["model_id", "event", "description", "timestamp", "user"])
+    for item in store.get("history", []):
+        ws_history.append([item.get("model_id"), item.get("event"), item.get("description"), item.get("timestamp"), item.get("user")])
+
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=model_inventory.xlsx"},
+    )
 
 
 @app.post("/data/feature-decision-log")
@@ -1835,10 +2095,24 @@ async def preprocess_data(
                 "proportion": float(prop),
             })
 
+    basic_feature_count = len([
+        c for c in feature_names
+        if c != target_col and c not in col_types.get("id", []) and str(c).lower() != "id"
+    ])
+    numeric_feature_count = len([
+        c for c in feature_names
+        if c != target_col and c not in col_types.get("id", []) and str(c).lower() != "id"
+        and c in prep_report.get("numeric", {})
+    ])
+    categorical_feature_count = len([
+        c for c in feature_names
+        if c != target_col and c not in col_types.get("id", []) and str(c).lower() != "id"
+        and c in prep_report.get("categorical", {})
+    ])
     summary_metrics = {
-        "features_basic": X_train.shape[1],
-        "numeric_columns": len(prep_report.get("numeric", {})),
-        "categorical_columns": len(prep_report.get("categorical", {})),
+        "features_basic": basic_feature_count,
+        "numeric_columns": numeric_feature_count,
+        "categorical_columns": categorical_feature_count,
         "boolean_columns": len(prep_report.get("boolean", {})),
         "datetime_columns": len(prep_report.get("datetime", {})),
         "duplicates_removed": clean_info.get("duplicates_removed", 0),
@@ -2274,6 +2548,15 @@ async def train_model_endpoint(
     csv_text: Optional[str] = Form(None),
     target_col: str = Form(...),
     model_name: str = Form(...),
+    estimator_name: Optional[str] = Form(None),
+    model_owner: Optional[str] = Form(None),
+    business_unit: Optional[str] = Form(None),
+    model_purpose: Optional[str] = Form(None),
+    model_version: Optional[str] = Form(None),
+    model_type: Optional[str] = Form(None),
+    development_date: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
+    documentation_path: Optional[str] = Form(None),
     test_size: float = Form(0.15),
     val_size: float = Form(0.15),
     random_seed: int = Form(42),
@@ -2336,20 +2619,24 @@ async def train_model_endpoint(
             raise HTTPException(status_code=400, detail=f"manual_params must be valid JSON: {exc}")
     else:
         manual_params_dict = None
+
+    business_model_name = model_name.strip()
+    estimator_name = (estimator_name or model_name).strip() or model_name
+
     if manual_params_dict is not None:
-        model = get_model_instance(model_name, task_type)
+        model = get_model_instance(estimator_name, task_type)
         valid_keys = set(model.get_params().keys())
         manual_params_dict = {k: v for k, v in manual_params_dict.items() if k in valid_keys}
         model = type(model)(**manual_params_dict)
     else:
         model = get_model_instance(
-            model_name,
+            estimator_name,
             task_type,
-            scale_pos_weight=scale_pos_weight if model_name == "XGBoost" else None,
+            scale_pos_weight=scale_pos_weight if estimator_name == "XGBoost" else None,
         )
     param_grid = None
     if use_hyperopt:
-        param_grid = get_hyperparameter_grid(model_name, task_type)
+        param_grid = get_hyperparameter_grid(estimator_name, task_type)
     pipeline, training_info, real_feature_names = train_model(
         X_train, y_train,
         col_types=col_types,
@@ -2424,6 +2711,39 @@ async def train_model_endpoint(
         )
     except Exception as e:
         print(f"[persistence] failed to log training: {e}")
+
+    try:
+        store = persistence.load_model_inventory()
+        persistence.register_development_model(
+            store=store,
+            business_model_name=business_model_name,
+            estimator_name=estimator_name,
+            intake_payload={
+                "model_owner": model_owner,
+                "business_unit": business_unit,
+                "model_purpose": model_purpose,
+                "model_version": model_version,
+                "model_type": model_type,
+                "development_date": development_date,
+                "status": status,
+                "documentation_path": documentation_path,
+            },
+            dataset_payload={
+                "file_name": getattr(file, "filename", None) or "uploaded_dataset",
+                "storage_reference": getattr(file, "filename", None) or "",
+                "source_type": "file",
+                "purpose": "Development dataset",
+                "record_count": int(df.shape[0]) if df is not None else None,
+                "column_count": int(df.shape[1]) if df is not None else None,
+                "target_variable": target_col,
+                "uploaded_by": model_owner or "user",
+                "uploaded_at": pd.Timestamp.now().isoformat(),
+            },
+            user=model_owner or "user",
+        )
+        persistence.save_model_inventory(store)
+    except Exception as e:
+        print(f"[persistence] failed to update inventory from development: {e}")
 
     return result
 
@@ -3043,6 +3363,7 @@ async def validation_performance(
     cv_folds: int = Form(5),
     mdd_file: Optional[UploadFile] = File(None),
     reported_json: Optional[str] = Form(None),
+    intake_json: Optional[str] = Form(None),
 ) -> Dict[str, Any]:
     """Stage 4 — Benchmarking only.
 
@@ -3082,6 +3403,14 @@ async def validation_performance(
     except Exception:
         seed_list = [random_seed]
 
+    intake_payload: Dict[str, Any] = {}
+    if intake_json:
+        try:
+            intake_payload = json.loads(intake_json)
+        except Exception:
+            intake_payload = {}
+
+    mdd_text = ""
     mdd_reported: Dict[str, Any] = {}
     if reported_json:
         try:
@@ -3151,19 +3480,23 @@ async def validation_performance(
         y_proba=y_proba_arr,
     )
 
+    performance_report = _build_performance_report(
+        df=df,
+        replication_result=replication_result,
+        intake_payload=intake_payload,
+        mdd_text=mdd_text,
+    )
+    performance_report["benchmark"] = benchmark_payload
+
     result = {
-        "stage": "benchmarking",
-        "report": {
-            "metrics": metrics,
-            "roc_curve": {"points": roc_curve, "auc": metrics.get("roc_auc")},
-            "benchmark": benchmark_payload,
-        },
+        "stage": "performance",
+        "report": performance_report,
     }
 
     try:
         persistence.log_event(
             persistence.VALIDATION_PIPELINE_LOG,
-            stage="benchmarking",
+            stage="performance",
             payload={
                 "model_name": model_name,
                 "metrics": metrics,
@@ -3301,9 +3634,10 @@ async def validation_replication(
     except Exception:
         seed_list = [random_seed]
 
-    resolved_model_name = (algorithm or model_name or "").strip()
-    if not resolved_model_name:
-        raise HTTPException(status_code=400, detail="Model or algorithm is required.")
+    try:
+        business_model_name, estimator_name = resolve_replication_model_inputs(model_name, algorithm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     intake_payload: Dict[str, Any] = {}
     if intake_json:
@@ -3338,10 +3672,49 @@ async def validation_replication(
         except Exception:
             pass
 
+    # Ensure the Model Inventory is updated from real validation uploads/intake.
+    try:
+        store = persistence.load_model_inventory()
+        inventory_model_name = business_model_name or estimator_name
+        dataset_payload = {
+            "file_name": getattr(file, "filename", None) or intake_payload.get("dataset_name") or "uploaded_dataset",
+            "storage_reference": getattr(file, "filename", None) or intake_payload.get("dataset_name") or "",
+            "source_type": "file",
+            "purpose": "Validation dataset",
+            "record_count": int(df.shape[0]) if df is not None else None,
+            "column_count": int(df.shape[1]) if df is not None else None,
+            "target_variable": intake_payload.get("target_col") or intake_payload.get("target") or target_col,
+            "uploaded_by": intake_payload.get("model_owner") or "user",
+            "uploaded_at": pd.Timestamp.now().isoformat(),
+        }
+        persistence.register_validation_run(
+            store=store,
+            business_model_name=inventory_model_name,
+            estimator_name=estimator_name,
+            intake_payload={
+                "model_type": intake_payload.get("model_type") or "PD (Probability of Default)",
+                "model_purpose": intake_payload.get("model_purpose") or intake_payload.get("business_purpose"),
+                "model_owner": intake_payload.get("model_owner") or intake_payload.get("owner") or "Unknown",
+                "owning_team": intake_payload.get("owning_team") or intake_payload.get("business_unit") or "Risk",
+                "model_version": intake_payload.get("model_version") or "1.0",
+                "regulatory_framework": intake_payload.get("regulatory_framework") or "Internal",
+                "mdd_document_path": intake_payload.get("mdd_document_path")
+                    or intake_payload.get("documentation_path")
+                    or intake_payload.get("document_path")
+                    or ("demo_data/flawed_mdd.txt" if str(intake_payload.get("demo_mode") or "").lower() == "flawed" else "demo_data/clean_mdd.txt" if str(intake_payload.get("demo_mode") or "").lower() == "clean" else None),
+            },
+            dataset_payload=dataset_payload,
+            target_col=target_col,
+            user=intake_payload.get("model_owner") or "user",
+        )
+        persistence.save_model_inventory(store)
+    except Exception as e:
+        print(f"[persistence] failed to update inventory from replication: {e}")
+
     result = run_replication(
         df=df,
         target_col=target_col,
-        model_name=resolved_model_name,
+        model_name=estimator_name,
         test_size=test_size,
         val_size=val_size,
         random_seed=random_seed,
@@ -3380,7 +3753,9 @@ async def validation_replication(
             persistence.VALIDATION_PIPELINE_LOG,
             stage="replication",
             payload={
-                "model_name": resolved_model_name,
+                "business_model_name": business_model_name,
+                "algorithm": estimator_name,
+                "model_name": estimator_name,
                 "metrics": performance_report.get("metrics"),
                 "flags": flags,
             },

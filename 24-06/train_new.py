@@ -83,17 +83,32 @@ def split_data(
     task_type: str = "binary",
     random_state: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
-    stratify = y if task_type in ("binary", "multiclass") else None
-
-    X_train_val, X_test, y_train_val, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=stratify, random_state=random_state
+    y_series = pd.Series(y)
+    should_stratify = (
+        task_type in ("binary", "multiclass")
+        and y_series.nunique() > 1
+        and len(y_series) >= 2 * y_series.nunique()
     )
-    adjusted_val = val_size / (1 - test_size)
-    stratify_val = y_train_val if task_type in ("binary", "multiclass") else None
+    stratify = y_series if should_stratify else None
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val, test_size=adjusted_val,
-        stratify=stratify_val, random_state=random_state
+    def _safe_split(arr_x, arr_y, split_size: float, split_stratify):
+        if split_size <= 0 or split_size >= 1:
+            split_size = min(max(split_size, 0.05), 0.95)
+        try:
+            return train_test_split(
+                arr_x, arr_y, test_size=split_size, stratify=split_stratify, random_state=random_state
+            )
+        except ValueError:
+            return train_test_split(
+                arr_x, arr_y, test_size=split_size, stratify=None, random_state=random_state
+            )
+
+    X_train_val, X_test, y_train_val, y_test = _safe_split(X, y_series, test_size, stratify)
+    adjusted_val = val_size / (1 - test_size)
+    stratify_val = y_train_val if should_stratify and len(y_train_val.unique()) > 1 else None
+
+    X_train, X_val, y_train, y_val = _safe_split(
+        X_train_val, y_train_val, adjusted_val, stratify_val
     )
     return X_train, X_val, X_test, y_train, y_val, y_test
 

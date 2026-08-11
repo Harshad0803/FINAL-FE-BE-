@@ -25,6 +25,7 @@ import { Route as DevelopmentRouteImport } from './routes/development'
 import { Route as DataUploadRouteImport } from './routes/data-upload'
 import { Route as DataPreparationRouteImport } from './routes/data-preparation'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ModelInventoryRouteImport } from './routes/model-inventory'
 import { Route as ValidationIndexRouteImport } from './routes/validation.index'
 import { Route as ValidationStressRouteImport } from './routes/validation.stress'
 import { Route as ValidationRegulatoryRouteImport } from './routes/validation.regulatory'
@@ -115,6 +116,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ModelInventoryRoute = ModelInventoryRouteImport.update({
+  id: '/model-inventory',
+  path: '/model-inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ValidationIndexRoute = ValidationIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -172,6 +178,7 @@ export interface FileRoutesByFullPath {
   '/features': typeof FeaturesRoute
   '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
+  '/model-inventory': typeof ModelInventoryRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
   '/profiling': typeof ProfilingRoute
@@ -199,6 +206,7 @@ export interface FileRoutesByTo {
   '/features': typeof FeaturesRoute
   '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
+  '/model-inventory': typeof ModelInventoryRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
   '/profiling': typeof ProfilingRoute
@@ -226,6 +234,7 @@ export interface FileRoutesById {
   '/features': typeof FeaturesRoute
   '/login': typeof LoginRoute
   '/model-training-evaluation': typeof ModelTrainingEvaluationRoute
+  '/model-inventory': typeof ModelInventoryRoute
   '/pd': typeof PdRoute
   '/preprocessing': typeof PreprocessingRoute
   '/profiling': typeof ProfilingRoute
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
     | '/validation/performance'
     | '/validation/regulatory'
     | '/validation/stress'
+      | '/model-inventory'
     | '/validation/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -295,6 +305,7 @@ export interface FileRouteTypes {
     | '/validation/performance'
     | '/validation/regulatory'
     | '/validation/stress'
+      | '/model-inventory'
     | '/validation'
   id:
     | '__root__'
@@ -336,6 +347,7 @@ export interface RootRouteChildren {
   FeaturesRoute: typeof FeaturesRoute
   LoginRoute: typeof LoginRoute
   ModelTrainingEvaluationRoute: typeof ModelTrainingEvaluationRoute
+  ModelInventoryRoute: typeof ModelInventoryRoute
   PdRoute: typeof PdRoute
   PreprocessingRoute: typeof PreprocessingRoute
   ProfilingRoute: typeof ProfilingRoute
@@ -451,6 +463,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModelTrainingEvaluationRouteImport
       parentRoute: typeof rootRouteImport
     }
+      '/model-inventory': {
+        id: '/model-inventory'
+        path: '/model-inventory'
+        fullPath: '/model-inventory'
+        preLoaderRoute: typeof ModelInventoryRouteImport
+        parentRoute: typeof rootRouteImport
+      }
     '/': {
       id: '/'
       path: '/'
@@ -569,6 +588,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   TrainingRoute: TrainingRoute,
   ValidationRoute: ValidationRouteWithChildren,
+  ModelInventoryRoute: ModelInventoryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

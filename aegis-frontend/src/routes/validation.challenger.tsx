@@ -144,7 +144,9 @@ function ModelReplicationPanel({
   const [localFile, setLocalFile] = React.useState<File | null>(null);
   const [mddFile, setMddFile] = React.useState<File | null>(null);
   const [targetCol, setTargetCol] = React.useState("");
-  const [modelName, setModelName] = React.useState("XGBoost");
+  // `modelIdentity` is the business/model name; `algorithm` is the technical framework.
+  const [modelIdentity, setModelIdentity] = React.useState("");
+  const [algorithm, setAlgorithm] = React.useState("XGBoost");
   const [testSize, setTestSize] = React.useState(0.15);
   const [valSize, setValSize] = React.useState(0.15);
   const [reported, setReported] = React.useState<Record<string, string>>({});
@@ -208,8 +210,8 @@ function ModelReplicationPanel({
 
   const contextFileAvailable = Boolean(ds.file || profile?.csv_text || profile?.dataset_name || profile?.name);
   const resolvedAlgorithmName = React.useMemo(() => {
-    return modelName.trim();
-  }, [modelName]);
+    return algorithm.trim();
+  }, [algorithm]);
   const activeFile = React.useMemo<File | null>(() => {
     if (localFile) return localFile;
     if (ds.file) return ds.file;
@@ -234,13 +236,19 @@ function ModelReplicationPanel({
 
     if (targetCandidates[0]) setTargetCol(targetCandidates[0]);
 
-    const contextModelName = [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]
+    // Prefill the model identity (business name) if present in prior stages.
+    const contextIdentity = [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim())
+      .find(Boolean);
+    if (contextIdentity) setModelIdentity(contextIdentity);
+
+    // Prefill algorithm if any context value matches a known algorithm option.
+    const contextAlg = [selectedModelName, trainingResult?.model_name, validationIntakeData?.model_name]
       .filter((value): value is string => Boolean(value))
       .map((value) => value.trim())
       .find((value) => MODEL_OPTIONS.includes(value));
-    if (contextModelName) {
-      setModelName(contextModelName);
-    }
+    if (contextAlg) setAlgorithm(contextAlg);
 
     if (trainingConfig) {
       if (typeof trainingConfig.test_size === "number") setTestSize(trainingConfig.test_size);
@@ -271,7 +279,7 @@ function ModelReplicationPanel({
       setError("Target column is required.");
       return;
     }
-    if (!modelName.trim()) {
+    if (!modelIdentity.trim()) {
       setError("Model is required.");
       return;
     }
@@ -293,8 +301,11 @@ function ModelReplicationPanel({
       } else if (typeof profile?.csv_text === "string") {
         form.append("csv_text", profile.csv_text);
       }
-      form.append("model_name", modelName.trim());
+      form.append("model_name", modelIdentity.trim());
       form.append("algorithm", algorithmName);
+      if (validationIntakeData) {
+        form.append("intake_json", JSON.stringify(validationIntakeData));
+      }
       form.append("target_col", targetCol.trim());
       form.append("test_size", String(testSize));
       form.append("val_size", String(valSize));
@@ -613,10 +624,20 @@ function ModelReplicationPanel({
         </div>
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Model</label>
+          <label className="text-xs font-medium text-muted-foreground">Model name (business identity)</label>
+          <input
+            value={modelIdentity}
+            onChange={(e) => setModelIdentity(e.target.value)}
+            placeholder="e.g. Credit Risk PD Model"
+            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Algorithm / Framework</label>
           <select
-            value={modelName}
-            onChange={(e) => setModelName(e.target.value)}
+            value={algorithm}
+            onChange={(e) => setAlgorithm(e.target.value)}
             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
           >
             {MODEL_OPTIONS.map((m) => (

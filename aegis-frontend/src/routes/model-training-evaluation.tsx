@@ -7,6 +7,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useDataset } from "@/lib/app-context";
 import { formUpload } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useAuth } from "@/lib/auth-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { useResumeState } from "@/hooks/use-resume-state";
 
@@ -121,6 +122,7 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
     setComparisonResults,
     setSelectedComparisonModel,
     preprocessingResult,
+    validationIntakeData,
   } = useDataset();
 
   // ── Split config: owned by Preprocessing (Step 3). Training only reads it. ──
@@ -158,8 +160,25 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
   const [evaluationMetrics, setEvaluationMetrics] = useState<Record<string, any> | null>(trainingResult?.evaluation_metrics ?? null);
   const [modelArtifact, setModelArtifact] = useState<string | null>(trainingResult?.model_artifact ?? null);
   const [taskType, setTaskType] = useState<string | null>(trainingResult?.task_type ?? null);
-  const [trainingModelName, setTrainingModelName] = useState<string | null>(trainingResult?.model_name ?? selectedModel?.name ?? null);
+  const [trainingModelName, setTrainingModelName] = useState<string | null>(trainingResult?.model_name ?? "");
   const [trainingConfigResult, setTrainingConfigResult] = useState<Record<string, any> | null>(trainingResult?.training_config ?? null);
+  const { user } = useAuth();
+  const [modelOwner, setModelOwner] = useState<string>(validationIntakeData?.model_owner ?? "");
+
+  useEffect(() => {
+    if ((!modelOwner || modelOwner.trim() === "") && user && typeof user.name === "string" && user.name.trim()) {
+      setModelOwner(user.name);
+    }
+    // Only update when user or validationIntakeData changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+  const [businessUnit, setBusinessUnit] = useState<string>(validationIntakeData?.owning_team ?? "");
+  const [modelPurpose, setModelPurpose] = useState<string>(validationIntakeData?.model_purpose ?? "");
+  const [modelVersion, setModelVersion] = useState<string>(validationIntakeData?.model_version ?? "1.0");
+  const [modelType, setModelType] = useState<string>(validationIntakeData?.model_type ?? "Custom");
+  const [developmentDate, setDevelopmentDate] = useState<string>("");
+  const [status, setStatus] = useState<string>("In Development");
+  const [documentationPath, setDocumentationPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modelComparison, setModelComparison] = useState<boolean>(false);
@@ -366,7 +385,8 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
     const trainForm = new FormData();
     trainForm.append("file", file);
     trainForm.append("target_col", profile.target_col || "loan_status");
-    trainForm.append("model_name", modelName);
+    trainForm.append("model_name", trainingModelName?.trim() || modelName);
+    trainForm.append("estimator_name", modelName);
     trainForm.append("test_size", String(config.test_size));
     trainForm.append("val_size", String(config.val_size));
     trainForm.append("random_seed", String(config.random_seed));
@@ -381,6 +401,14 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
     if (Object.keys(config.manual_params).length > 0) {
       trainForm.append("manual_params", JSON.stringify(config.manual_params));
     }
+    trainForm.append("model_owner", modelOwner);
+    trainForm.append("business_unit", businessUnit);
+    trainForm.append("model_purpose", modelPurpose);
+    trainForm.append("model_version", modelVersion);
+    trainForm.append("model_type", modelType);
+    trainForm.append("development_date", developmentDate);
+    trainForm.append("status", status);
+    trainForm.append("documentation_path", documentationPath);
     // PD classification cut-off. Omitted entirely when "Auto" is on, so the
     // backend (main.py's _build_evaluation_data, threshold=None) auto-selects
     // the F1-maximizing threshold. Only send an explicit value when the
@@ -395,7 +423,7 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
     }
 
     return {
-      model_name: modelName,
+      model_name: trainResponse.model_name ?? (trainingModelName?.trim() || modelName),
       task_type: trainResponse.task_type ?? "binary",
       real_feature_names: trainResponse.real_feature_names ?? [],
       training_config: trainResponse.training_config ?? null,
@@ -1103,6 +1131,93 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
             {useAutoThreshold ? " (auto-selected to maximize F1)" : " (manual override)"}.
           </p>
         )}
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+        <h2 className="text-base font-semibold mb-4">Development Model Metadata</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium block mb-2">Model Name</label>
+            <input
+              value={trainingModelName ?? selectedModel?.name ?? ""}
+              onChange={(e) => setTrainingModelName(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="Business model name"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Model Owner</label>
+            <input
+              value={modelOwner}
+              onChange={(e) => setModelOwner(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="Name of the development owner"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Business Unit</label>
+            <input
+              value={businessUnit}
+              onChange={(e) => setBusinessUnit(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="Business unit or team"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium block mb-2">Model Purpose</label>
+            <input
+              value={modelPurpose}
+              onChange={(e) => setModelPurpose(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="Purpose of the development model"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Model Version</label>
+            <input
+              value={modelVersion}
+              onChange={(e) => setModelVersion(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="1.0"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Model Type</label>
+            <input
+              value={modelType}
+              onChange={(e) => setModelType(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="PD (Probability of Default)"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Documentation Path</label>
+            <input
+              value={documentationPath}
+              onChange={(e) => setDocumentationPath(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="docs/pd_model_internal_v1_mdd.pdf"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Development Date</label>
+            <input
+              type="date"
+              value={developmentDate}
+              onChange={(e) => setDevelopmentDate(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-2">Status</label>
+            <input
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              placeholder="In Development"
+            />
+          </div>
+        </div>
       </section>
 
       {/* Manual Hyperparameter Controls */}

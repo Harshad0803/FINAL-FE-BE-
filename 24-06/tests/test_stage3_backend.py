@@ -29,27 +29,20 @@ def test_stage3_payload_contains_structured_sections():
     body = response.json()
 
     assert "featureRelevance" in body
-    assert "methodologyReview" in body
-    assert "modelAssumptions" in body
-    assert "documentationChecklist" in body
+    assert "thresholdChecks" in body
+    assert "ragRules" in body
+    assert "summary" in body
     assert "regulatoryAlignment" in body
+    assert "raw_findings" in body
+    assert "replicated_importances" in body
+    assert "pending_llm_ids" in body
+    assert "llm_ran" in body
+    assert "timestamp" in body
 
-    methodology_titles = {item["title"] for item in body["methodologyReview"]}
-    assumption_titles = {item["title"] for item in body["modelAssumptions"]}
-    documentation_titles = {item["title"] for item in body["documentationChecklist"]}
-
-    assert "Model algorithm" in methodology_titles
-    assert "Cross-validation strategy" in methodology_titles
-    assert "Calibration method" in methodology_titles
-    assert "Linearity" in assumption_titles
-    assert "Independence" in assumption_titles
-    assert "Default definition consistency" in assumption_titles
-    assert "Model Development Document" in documentation_titles
-    assert "Data Lineage" in documentation_titles
-    assert "Independent Code Review" in documentation_titles
-    assert "Sensitivity Analysis" in documentation_titles
-    assert "Reproducibility Package" in documentation_titles
-    assert "Limitations Statement" in documentation_titles
+    assert isinstance(body["thresholdChecks"], list)
+    assert isinstance(body["ragRules"], list)
+    assert isinstance(body["summary"], dict)
+    assert isinstance(body["regulatoryAlignment"], dict)
 
     regulatory = body["regulatoryAlignment"]
     assert "verdict" in regulatory
