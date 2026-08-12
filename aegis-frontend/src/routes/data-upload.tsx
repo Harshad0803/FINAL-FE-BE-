@@ -114,7 +114,6 @@ function DataUpload() {
   }, [profile, hasExplicitDataset, setUploadResult]);
 
   // ── Macroeconomic data (FRED) ───────────────────────────────────────────────
-  const [fredApiKey, setFredApiKey] = useState<string>("");
   const [macroCandidates, setMacroCandidates] = useState<MacroDateCandidate[]>([]);
   const [macroCandidatesLoading, setMacroCandidatesLoading] = useState(false);
   const [selectedMacroDateCol, setSelectedMacroDateCol] = useState<string>("");
@@ -206,17 +205,12 @@ function DataUpload() {
   const fetchMacroFeatures = async () => {
     const baseFile = originalCustomerFileRef.current ?? customerFile;
     if (!baseFile || !selectedMacroDateCol) return;
-    if (!fredApiKey.trim()) {
-      setMacroError("Enter your FRED API key above to fetch macro data.");
-      return;
-    }
     try {
       setMacroLoading(true);
       setMacroError(null);
       const form = new FormData();
       form.append("file", baseFile);
       form.append("date_col", selectedMacroDateCol);
-      form.append("fred_api_key", fredApiKey.trim());
       const res = await formUpload<{
         macro_columns: string[];
         date_col_used: string;
@@ -506,27 +500,13 @@ function DataUpload() {
                   )}
                 </div>
                 <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    FRED API key
-                  </label>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={fredApiKey}
-                    onChange={(e) => setFredApiKey(e.target.value)}
-                    placeholder="Enter your FRED API key"
-                    className="mt-2 w-full max-w-md rounded-lg border border-input bg-background px-3 py-2 text-sm"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Used for this request only — never stored on the server. Get a free key at{" "}
-                    <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" rel="noreferrer" className="underline">
-                      fred.stlouisfed.org
-                    </a>.
+                  <p className="text-xs text-muted-foreground">
+                    Optionally enrich the dataset with macroeconomic indicators from FRED. The FRED integration is configured server-side.
                   </p>
                 </div>
                 <button
                   type="button"
-                  disabled={!selectedMacroDateCol || !fredApiKey.trim() || macroLoading || macroCandidatesLoading}
+                  disabled={!selectedMacroDateCol || macroLoading || macroCandidatesLoading}
                   className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={fetchMacroFeatures}
                 >

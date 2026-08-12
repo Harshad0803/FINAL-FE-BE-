@@ -1643,7 +1643,6 @@ async def integration_run(
     join_specs_json: Optional[str] = Form(None),
     fetch_macro: bool = Form(False),
     macro_date_col: Optional[str] = Form(None),
-    fred_api_key: Optional[str] = Form(None),
     join_how: str = Form("left"),
 ) -> Dict[str, Any]:
     """Parts D/E/F/G/I — run the full integration: merge the customer CSV
@@ -1696,9 +1695,9 @@ async def integration_run(
             raise HTTPException(status_code=400, detail=str(exc))
 
         if fetch_macro:
-            api_key = (fred_api_key or "").strip()
+            api_key = os.environ.get("FRED_API_KEY", "").strip()
             if not api_key:
-                integrator.report.warnings.append("No FRED API key was provided — macro data was not fetched.")
+                integrator.report.warnings.append("No FRED API key is configured on the server — macro data was not fetched.")
             else:
                 integrated = integrator.attach_macro(integrated, macro_date_col, fred_client, api_key)
 
@@ -2405,7 +2404,6 @@ async def macro_fetch(
     csv_text: Optional[str] = Form(None),
     synthetic_samples: Optional[int] = Form(None),
     date_col: Optional[str] = Form(None),
-    fred_api_key: str = Form(...),
 ) -> Dict[str, Any]:
     """
     Fetch FRED macro features (GDP, unemployment, Fed funds rate) aligned to
@@ -2415,18 +2413,24 @@ async def macro_fetch(
     `csv_text` into /data/preprocess and /data/feature-engineering, plus the
     new macro column names for display.
 
-    The FRED API key is supplied by the caller on every request (entered in
-    the UI) — it is never read from an environment variable or stored
-    anywhere on the server between requests.
+    The FRED API key is configured on the server and read from the
+    FRED_API_KEY environment variable. The frontend does not send the API key
+    on each request.
 
     `date_col` is optional: when omitted, the loan-origination date column is
     auto-detected via fred_client.detect_macro_date_col (same heuristic used
     to populate /data/macro/date-columns's default_date_col), so the caller
     doesn't need to resolve it up front.
     """
-    api_key = (fred_api_key or "").strip()
+    api_key = os.environ.get("FRED_API_KEY", "").strip()
     if not api_key:
-        raise HTTPException(status_code=400, detail="A FRED API key is required.")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "FRED macroeconomic integration is not configured on the server. "
+                "Please set the FRED_API_KEY environment variable."
+            ),
+        )
 
     df = await _read_dataframe(file=file, csv_text=csv_text, synthetic_samples=synthetic_samples)
 
@@ -4563,7 +4567,10 @@ async def validation_stage7_run(
         "pass": sum(1 for c in checks if c.get("status") == "PASS"),
         "warn": sum(1 for c in checks if c.get("status") == "WARN"),
         "fail": sum(1 for c in checks if c.get("status") == "FAIL"),
-        "na": sum(1 for c in checks if c.get("status") not in ("PASS", "WARN", "FAIL")),
+        "pending": sum(1 for c in checks if c.get("status") == "PENDING"),
+        # If a check is explicitly pending it must be counted in Pending, not
+        # in N/A. N/A is for checks intentionally excluded from this stage.
+        "na": sum(1 for c in checks if c.get("status") not in ("PASS", "WARN", "FAIL", "PENDING")),
     }
 
     return {"checks": checks, "summary": summary}

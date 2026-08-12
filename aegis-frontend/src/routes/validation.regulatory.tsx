@@ -31,7 +31,7 @@ type ThresholdCheck = {
 
 type Stage7Response = {
   checks: ThresholdCheck[];
-  summary: { total: number; pass: number; warn: number; fail: number; na?: number };
+  summary: { total: number; pass: number; warn: number; fail: number; pending?: number; na?: number };
 };
 
 type BiasRow = { Group: string; Count: number; "Default Rate": number; "Avg Predicted PD": number; AUC: number | null };
@@ -184,7 +184,7 @@ function Regulatory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validationIntakeData, validationMddText]);
 
-  const summary = data?.summary ?? { total: 0, pass: 0, warn: 0, fail: 0 };
+  const summary = data?.summary ?? { total: 0, pass: 0, warn: 0, fail: 0, pending: 0, na: 0 };
   const totalChecks = deriveCheckTotal(summary);
   const progress = totalChecks > 0 ? Math.round((summary.pass / totalChecks) * 100) : 0;
 
@@ -489,24 +489,6 @@ function Regulatory() {
                     </>
                   ) : null}
 
-                  {biasData?.check ? (
-                    <div className="mt-4">
-                      <ThresholdCheckCard
-                        check={{
-                          check_id: biasData.check.check_id,
-                          title: biasData.check.title,
-                          severity: biasData.check.severity,
-                          status: biasData.check.status,
-                          source: biasData.check.source,
-                          principle: biasData.check.principle,
-                          observed: biasData.check.observed,
-                          threshold: biasData.check.threshold,
-                          detail: biasData.check.detail,
-                          check_type: biasData.check.check_type,
-                        }}
-                      />
-                    </div>
-                  ) : null}
                 </>
               )}
             </section>
