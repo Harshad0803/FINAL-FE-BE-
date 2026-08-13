@@ -245,6 +245,60 @@ def test_register_development_model_generates_real_pdf_documentation_for_model_r
     assert (persistence.BACKEND_DIR / model["documentation_path"]).exists()
 
 
+def test_register_development_model_persists_training_and_evaluation_metadata():
+    store = {"models": [], "data_sources": [], "validation": [], "history": []}
+
+    persistence.register_development_model(
+        store=store,
+        business_model_name="PD_RetailCredit_v4",
+        estimator_name="LightGBM",
+        intake_payload={
+            "model_owner": "Harshad",
+            "business_unit": "Risk",
+            "model_purpose": "Retail portfolio PD model",
+            "model_version": "v4.0",
+            "model_type": "PD (Probability of Default)",
+            "development_date": "2026-09-01",
+            "status": "In Development",
+            "training_info": {
+                "test_size": 0.15,
+                "val_size": 0.15,
+                "use_cv": True,
+                "use_hyperopt": False,
+            },
+            "evaluation_metrics": {
+                "roc_auc": 0.93,
+                "accuracy": 0.88,
+                "f1": 0.79,
+            },
+        },
+        dataset_payload={
+            "file_name": "retail_pd_dataset_v4.csv",
+            "storage_reference": "retail_pd_dataset_v4.csv",
+            "source_type": "file",
+            "purpose": "Development dataset",
+            "record_count": 45000,
+            "column_count": 38,
+            "target_variable": "default_flag",
+            "uploaded_by": "Harshad",
+        },
+        user="Harshad",
+    )
+
+    model = store["models"][0]
+    assert model["training_info"]["use_cv"] is True
+    assert model["evaluation_metrics"]["roc_auc"] == 0.93
+    assert model["evaluation_metrics"]["accuracy"] == 0.88
+    assert model["documentation_path"].endswith(".pdf")
+    assert (persistence.BACKEND_DIR / model["documentation_path"]).exists()
+    # Verify the generated PDF includes run-specific dataset and metric fields
+    pdf_path = persistence.BACKEND_DIR / model["documentation_path"]
+    content = pdf_path.read_bytes()
+    assert b"Dataset Record Count" in content
+    assert b"Roc Auc" in content or b"Roc_auc" in content
+    assert b"Cross-Validation: Enabled" in content
+
+
 def test_validation_run_leaves_development_record_unchanged_and_uses_validation_id():
     store = {
         "development": [{

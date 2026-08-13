@@ -385,7 +385,12 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
     const trainForm = new FormData();
     trainForm.append("file", file);
     trainForm.append("target_col", profile.target_col || "loan_status");
-    trainForm.append("model_name", trainingModelName?.trim() || modelName);
+    // If the user didn't provide an explicit business `model_name`, send
+    // an empty string rather than defaulting to the estimator name. This
+    // prevents accidental updates to existing inventory entries that use
+    // the algorithm name as their `model_name`.
+    const modelNameToSend = trainingModelName && trainingModelName.trim() ? trainingModelName.trim() : "";
+    trainForm.append("model_name", modelNameToSend);
     trainForm.append("estimator_name", modelName);
     trainForm.append("test_size", String(config.test_size));
     trainForm.append("val_size", String(config.val_size));
@@ -439,6 +444,14 @@ function TrainingTab({ onProceed }: { onProceed: () => void }) {
   const handleTrain = async () => {
     if (!profile || !file || !selectedModel) {
       setError("Missing profile, file, or model selection");
+      return;
+    }
+
+    // Require an explicit Business Model Name before training to avoid
+    // accidental updates of existing inventory entries when the field is
+    // left blank.
+    if (!trainingModelName || (typeof trainingModelName === "string" && trainingModelName.trim() === "")) {
+      setError("Please enter a Business Model Name before starting development.");
       return;
     }
 

@@ -209,6 +209,7 @@ function Intake() {
   const [mddFileName, setMddFileName] = useState<string | null>(null);
   const [mddText, setMddText] = useState<string | null>(null);
   const [mddMetrics, setMddMetrics] = useState<Record<string, any> | null>(null);
+  const [mddDocumentPath, setMddDocumentPath] = useState<string | null>(null);
   const [trainingCodeFileName, setTrainingCodeFileName] = useState<string | null>(null);
   const [perfFileName, setPerfFileName] = useState<string | null>(null);
   const [profileFileName, setProfileFileName] = useState<string | null>(null);
@@ -261,6 +262,7 @@ function Intake() {
         setMddFileName(s.mddFileName ?? null);
         setMddText(s.mddText ?? null);
         setMddMetrics(s.mddMetrics ?? null);
+        setMddDocumentPath(s.mddDocumentPath ?? null);
         setTrainingCodeFileName(s.trainingCodeFileName ?? null);
         setPerfFileName(s.perfFileName ?? null);
         setProfileFileName(s.profileFileName ?? null);
@@ -287,7 +289,7 @@ function Intake() {
     if (typeof window === "undefined" || !isRestored) return;
     const snapshot = {
       intake, intakeLoaded, modelName, owningTeam, modelOwner, leadValidator, modelType, tier, version, purpose, frameworks,
-      demoMode, mddFileName, mddText, mddMetrics, trainingCodeFileName, perfFileName, profileFileName,
+      demoMode, mddFileName, mddText, mddMetrics, mddDocumentPath, trainingCodeFileName, perfFileName, profileFileName,
       assumptionsFileName, hyperparamsFileName, chkInventory, chkTier, chkArtifacts, chkPrevFindings, chkRegScope,
       chkIndependence, chkPlanApproved, chkAttestation,
     };
@@ -334,6 +336,7 @@ function Intake() {
       model_version: version,
       model_purpose: purpose,
       mdd_text: mddText ?? null,
+      mdd_document_path: mddDocumentPath ?? null,
       frameworks,
     });
     navigate({ to: intake.nextStep.path });
@@ -461,6 +464,7 @@ function Intake() {
         const intakeSnapshot = {
           ...snapshot,
           mdd_text: snapshot.mdd_text ?? null,
+          mdd_document_path: snapshot.mdd_document_path ?? null,
           frameworks: selectedFrameworks,
         };
         setValidationIntakeData(intakeSnapshot);
@@ -476,6 +480,7 @@ function Intake() {
         if (snapshot.mdd_text) {
           setMddText(snapshot.mdd_text);
           setMddFileName("Parsed MDD from backend");
+          setMddDocumentPath(snapshot.mdd_document_path ?? null);
           setValidationMddText(snapshot.mdd_text);
         }
       }
@@ -732,6 +737,7 @@ function Intake() {
                     const resp = await formUpload<Record<string, any>>("/validation/parse-mdd", form);
                     setMddText(resp?.mdd_text ?? null);
                     setMddMetrics(resp?.metrics ?? null);
+                    setMddDocumentPath(resp?.mdd_document_path ?? null);
                     // Publish to shared context — Stage 3's RAG keyword-search
                     // check (check_mdd_keywords) reads validationMddText from
                     // here. Without this, an MDD uploaded via this input never

@@ -15,6 +15,7 @@ import re
 import urllib.request
 import urllib.error
 import urllib.parse
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple, Union
 
@@ -1558,6 +1559,21 @@ def _save_upload_to_temp(file: UploadFile, suffix: str = ".db") -> str:
         return tmp.name
 
 
+def _save_uploaded_mdd(file: UploadFile) -> str:
+    """Persist an uploaded MDD file to a backend-visible path for inventory docs."""
+    target_dir = APP_DATA_DIR / "validation_mdds"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    file_name = Path(file.filename or "validation_mdd.txt").name
+    if not file_name:
+        file_name = "validation_mdd.txt"
+    unique_name = f"{pd.Timestamp.now().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:8]}_{file_name}"
+    target_path = target_dir / unique_name
+    file.file.seek(0)
+    with open(target_path, "wb") as out:
+        out.write(file.file.read())
+    return str(target_path.relative_to(BACKEND_DIR))
+
+
 def _unlink_quietly(path: str) -> None:
     """Best-effort temp-file cleanup. On Windows a sqlite3 connection can
     still hold the file open for a moment after its Python object goes out
@@ -2718,6 +2734,61 @@ async def train_model_endpoint(
 
     try:
         store = persistence.load_model_inventory()
+        # Collect additional dataset and preprocessing metadata from the
+        # existing pipeline outputs so the Development Inventory captures
+        # the real values already computed during training.
+        numeric_count = len(col_types.get("numeric", [])) if isinstance(col_types, dict) else None
+        categorical_count = len(col_types.get("categorical", [])) if isinstance(col_types, dict) else None
+        missing_value_count = int(df.isna().sum().sum()) if df is not None else None
+        missing_value_pct = float(df.isna().mean().mean() * 100) if df is not None else None
+        duplicate_count = int(df.duplicated().sum()) if df is not None else None
+        class_distribution = None
+        try:
+            class_distribution = (df[target_col].value_counts(normalize=True).to_dict() if (df is not None and target_col in df.columns) else None)
+        except Exception:
+            class_distribution = None
+
+        date_min = date_max = None
+        if origination_date_col and origination_date_col in df.columns:
+            try:
+                s = pd.to_datetime(df[origination_date_col], errors="coerce")
+                date_min = str(s.min()) if not s.min() is pd.NaT else None
+                date_max = str(s.max()) if not s.max() is pd.NaT else None
+            except Exception:
+                date_min = date_max = None
+
+        # Preprocessing summary is available from `prep_report` passed to train_model
+        preprocessing_summary = prep_report if isinstance(prep_report, dict) else None
+
+        # Encoding / scaling summaries
+        encoding = {}
+        scaling = {}
+        try:
+            if isinstance(prep_report, dict):
+                for c, info in (prep_report.get("categorical", {}) or {}).items():
+                    encoding[c] = info.get("encoding")
+                # transform recommendations indicate scaling/transform choices
+                scaling = prep_report.get("transform_recommendations") or {}
+        except Exception:
+            encoding = {}
+            scaling = {}
+
+        # Feature selection / FE artifacts
+        feature_selection = {
+            "low_iv_cols": plan.get("low_iv_cols", []) if plan else [],
+            "low_variance_cols": plan.get("low_variance_cols", []) if plan else [],
+            "dropped_high_corr_pairs": plan.get("drop_high_corr_pairs", []) if plan else [],
+        }
+
+        # Feature importance (cheap) — extract real names + normalized importances
+        try:
+            importance_df = extract_feature_importance(pipeline)
+            feature_importances = importance_df.to_dict(orient="records") if importance_df is not None else None
+            top_model_drivers = [r.get("Feature") for r in (feature_importances or [])[:10]] if feature_importances else None
+        except Exception:
+            feature_importances = None
+            top_model_drivers = None
+
         persistence.register_development_model(
             store=store,
             business_model_name=business_model_name,
@@ -2731,6 +2802,17 @@ async def train_model_endpoint(
                 "development_date": development_date,
                 "status": status,
                 "documentation_path": documentation_path,
+                "training_info": training_info,
+                "split_stats": split_stats,
+                "feature_engineering_summary": fe_summary,
+                "evaluation_metrics": metrics,
+                "real_feature_names": real_feature_names,
+                "preprocessing_summary": preprocessing_summary,
+                "encoding": encoding,
+                "scaling": scaling,
+                "feature_selection": feature_selection,
+                "feature_importances": feature_importances,
+                "top_model_drivers": top_model_drivers,
             },
             dataset_payload={
                 "file_name": getattr(file, "filename", None) or "uploaded_dataset",
@@ -2739,6 +2821,14 @@ async def train_model_endpoint(
                 "purpose": "Development dataset",
                 "record_count": int(df.shape[0]) if df is not None else None,
                 "column_count": int(df.shape[1]) if df is not None else None,
+                "numeric_column_count": numeric_count,
+                "categorical_column_count": categorical_count,
+                "missing_value_count": missing_value_count,
+                "missing_value_pct": missing_value_pct,
+                "duplicate_record_count": duplicate_count,
+                "class_distribution": class_distribution,
+                "date_min": date_min,
+                "date_max": date_max,
                 "target_variable": target_col,
                 "uploaded_by": model_owner or "user",
                 "uploaded_at": pd.Timestamp.now().isoformat(),
@@ -2747,7 +2837,9 @@ async def train_model_endpoint(
         )
         persistence.save_model_inventory(store)
     except Exception as e:
+        import traceback
         print(f"[persistence] failed to update inventory from development: {e}")
+        traceback.print_exc()
 
     return result
 
@@ -3660,6 +3752,11 @@ async def validation_replication(
         except Exception:
             pass
     if mdd_file is not None:
+        try:
+            if not intake_payload.get("mdd_document_path"):
+                intake_payload["mdd_document_path"] = _save_uploaded_mdd(mdd_file)
+        except Exception:
+            pass
         try:
             # parse_mdd_file was ported from Streamlit and expects a sync
             # file-like object with .name/.seek()/.read(). FastAPI's
@@ -4586,12 +4683,18 @@ async def validation_parse_mdd(
     matching route registered here, which is what produced the 404.
     """
     try:
+        mdd_document_path = _save_uploaded_mdd(mdd_file)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save MDD: {exc}")
+
+    try:
+        mdd_file.file.seek(0)
         mdd_text = parse_mdd_file(_sync_file_like(mdd_file))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse MDD: {exc}")
 
     metrics = extract_metrics_from_mdd(mdd_text)
-    return {"mdd_text": mdd_text, "metrics": metrics}
+    return {"mdd_text": mdd_text, "metrics": metrics, "mdd_document_path": mdd_document_path}
 
 
 @app.post("/validation/stage8/findings")
