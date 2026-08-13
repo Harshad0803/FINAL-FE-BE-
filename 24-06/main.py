@@ -2688,6 +2688,37 @@ async def train_model_endpoint(
         dates=dates_test, date_columns=[origination_date_col] if origination_date_col else [],
     )
 
+    # Additional dataset / preprocessing metadata computed by the pipeline
+    numeric_count = len(col_types.get("numeric", [])) if isinstance(col_types, dict) else None
+    categorical_count = len(col_types.get("categorical", [])) if isinstance(col_types, dict) else None
+    missing_value_count = int(df.isna().sum().sum()) if df is not None else None
+    missing_value_pct = float(df.isna().mean().mean() * 100) if df is not None else None
+    duplicate_count = int(df.duplicated().sum()) if df is not None else None
+    class_distribution = None
+    try:
+        class_distribution = (df[target_col].value_counts(normalize=True).to_dict() if (df is not None and target_col in df.columns) else None)
+    except Exception:
+        class_distribution = None
+
+    preprocessing_summary = prep_report if isinstance(prep_report, dict) else None
+
+    encoding = {}
+    scaling = {}
+    try:
+        if isinstance(prep_report, dict):
+            for c, info in (prep_report.get("categorical", {}) or {}).items():
+                encoding[c] = info.get("encoding")
+            scaling = prep_report.get("transform_recommendations") or {}
+    except Exception:
+        encoding = {}
+        scaling = {}
+
+    feature_selection = {
+        "low_iv_cols": plan.get("low_iv_cols", []) if plan else [],
+        "low_variance_cols": plan.get("low_variance_cols", []) if plan else [],
+        "dropped_high_corr_pairs": plan.get("drop_high_corr_pairs", []) if plan else [],
+    }
+
     result = {
         "task_type": task_type,
         "model_name": model_name,
@@ -2709,17 +2740,31 @@ async def train_model_endpoint(
         "training_info": training_info,
         "split_stats": split_stats,
         "feature_engineering_summary": fe_summary,
+        "feature_selection": feature_selection,
+        "preprocessing_summary": preprocessing_summary,
+        "encoding": encoding,
+        "scaling": scaling,
         "low_iv_columns": plan.get("low_iv_cols", []) if plan else [],
         "low_variance_columns": plan.get("low_variance_cols", []) if plan else [],
         "dropped_high_corr_pairs": plan.get("drop_high_corr_pairs", []) if plan else [],
         "applied_steps": plan.get("applied_steps", []) if plan else [],
         "evaluation_metrics": metrics,
         "evaluation_data": evaluation_data,
+        "numeric_column_count": numeric_count,
+        "categorical_column_count": categorical_count,
+        "missing_value_count": missing_value_count,
+        "missing_value_pct": missing_value_pct,
+        "duplicate_record_count": duplicate_count,
+        "class_distribution": class_distribution,
         "model_artifact": _to_base64(pipeline),
     }
 
     try:
-        persistence.log_event(
+        print(f"[registration-flow] entered registration try block for model: {business_model_name}")
+        # Record training artifact and capture run id so we can update
+        # the artifact with the assigned development `model_id` after
+        # registration.
+        run_id = persistence.log_event(
             persistence.DEV_PIPELINE_LOG,
             stage="training",
             payload={
@@ -2729,10 +2774,64 @@ async def train_model_endpoint(
             },
             full_payload=result,
         )
+        # Immediate -- ensure registration is attempted right after artifact creation.
+        try:
+            early_store = persistence.load_model_inventory()
+            early_reg = persistence.register_development_model(
+                store=early_store,
+                business_model_name=business_model_name,
+                estimator_name=estimator_name,
+                intake_payload={
+                    "model_owner": model_owner,
+                    "business_unit": business_unit,
+                    "model_purpose": model_purpose,
+                    "model_version": model_version,
+                    "development_date": development_date,
+                    "status": status,
+                    "training_info": training_info,
+                    "split_stats": split_stats,
+                    "evaluation_metrics": metrics,
+                },
+                dataset_payload={
+                    "file_name": getattr(file, "filename", None) or "uploaded_dataset",
+                    "storage_reference": getattr(file, "filename", None) or "",
+                    "record_count": int(df.shape[0]) if df is not None else None,
+                    "column_count": int(df.shape[1]) if df is not None else None,
+                    "numeric_column_count": numeric_count,
+                    "categorical_column_count": categorical_count,
+                    "missing_value_count": missing_value_count,
+                    "missing_value_pct": missing_value_pct,
+                    "duplicate_record_count": duplicate_count,
+                    "class_distribution": class_distribution,
+                    "target_variable": target_col,
+                    "uploaded_by": model_owner or "user",
+                    "uploaded_at": pd.Timestamp.now().isoformat(),
+                },
+                user=model_owner or "user",
+            )
+            try:
+                # Persist inventory and update artifact immediately
+                persistence.save_model_inventory(early_store)
+            except Exception:
+                pass
+            try:
+                if isinstance(early_reg, dict) and early_reg.get("model_id"):
+                    result["model_id"] = early_reg.get("model_id")
+                    persistence.save_artifact(persistence.DEV_PIPELINE_LOG, "training", run_id, result)
+            except Exception:
+                pass
+        except Exception as _e:
+            try:
+                import traceback
+                print(f"[registration] immediate registration attempt failed: {_e}")
+                traceback.print_exc()
+            except Exception:
+                print(f"[registration] immediate registration failed: {_e}")
     except Exception as e:
         print(f"[persistence] failed to log training: {e}")
 
     try:
+        print(f"[registration-flow] entering post-artifact registration flow for model: {business_model_name}")
         store = persistence.load_model_inventory()
         # Collect additional dataset and preprocessing metadata from the
         # existing pipeline outputs so the Development Inventory captures
@@ -2789,53 +2888,119 @@ async def train_model_endpoint(
             feature_importances = None
             top_model_drivers = None
 
-        persistence.register_development_model(
-            store=store,
-            business_model_name=business_model_name,
-            estimator_name=estimator_name,
-            intake_payload={
-                "model_owner": model_owner,
-                "business_unit": business_unit,
-                "model_purpose": model_purpose,
-                "model_version": model_version,
-                "model_type": model_type,
-                "development_date": development_date,
-                "status": status,
-                "documentation_path": documentation_path,
-                "training_info": training_info,
-                "split_stats": split_stats,
-                "feature_engineering_summary": fe_summary,
-                "evaluation_metrics": metrics,
-                "real_feature_names": real_feature_names,
-                "preprocessing_summary": preprocessing_summary,
-                "encoding": encoding,
-                "scaling": scaling,
-                "feature_selection": feature_selection,
-                "feature_importances": feature_importances,
-                "top_model_drivers": top_model_drivers,
-            },
-            dataset_payload={
-                "file_name": getattr(file, "filename", None) or "uploaded_dataset",
-                "storage_reference": getattr(file, "filename", None) or "",
-                "source_type": "file",
-                "purpose": "Development dataset",
-                "record_count": int(df.shape[0]) if df is not None else None,
-                "column_count": int(df.shape[1]) if df is not None else None,
-                "numeric_column_count": numeric_count,
-                "categorical_column_count": categorical_count,
-                "missing_value_count": missing_value_count,
-                "missing_value_pct": missing_value_pct,
-                "duplicate_record_count": duplicate_count,
-                "class_distribution": class_distribution,
-                "date_min": date_min,
-                "date_max": date_max,
-                "target_variable": target_col,
-                "uploaded_by": model_owner or "user",
-                "uploaded_at": pd.Timestamp.now().isoformat(),
-            },
-            user=model_owner or "user",
-        )
-        persistence.save_model_inventory(store)
+        # Register the development model and capture the returned id/name
+        try:
+            print(f"[registration] attempting to register development model: {business_model_name}")
+            reg_result = persistence.register_development_model(
+                store=store,
+                business_model_name=business_model_name,
+                estimator_name=estimator_name,
+                intake_payload={
+                    "model_owner": model_owner,
+                    "business_unit": business_unit,
+                    "model_purpose": model_purpose,
+                    "model_version": model_version,
+                    "model_type": model_type,
+                    "development_date": development_date,
+                    "status": status,
+                    "documentation_path": documentation_path,
+                    "training_info": training_info,
+                    "split_stats": split_stats,
+                    "feature_engineering_summary": fe_summary,
+                    "evaluation_metrics": metrics,
+                    "real_feature_names": real_feature_names,
+                    "preprocessing_summary": preprocessing_summary,
+                    "encoding": encoding,
+                    "scaling": scaling,
+                    "feature_selection": feature_selection,
+                    "feature_importances": feature_importances,
+                    "top_model_drivers": top_model_drivers,
+                    "training_config": training_config,
+                },
+                dataset_payload={
+                    "file_name": getattr(file, "filename", None) or "uploaded_dataset",
+                    "storage_reference": getattr(file, "filename", None) or "",
+                    "source_type": "file",
+                    "purpose": "Development dataset",
+                    "record_count": int(df.shape[0]) if df is not None else None,
+                    "column_count": int(df.shape[1]) if df is not None else None,
+                    "numeric_column_count": numeric_count,
+                    "categorical_column_count": categorical_count,
+                    "missing_value_count": missing_value_count,
+                    "missing_value_pct": missing_value_pct,
+                    "duplicate_record_count": duplicate_count,
+                    "class_distribution": class_distribution,
+                    "date_min": date_min,
+                    "date_max": date_max,
+                    "target_variable": target_col,
+                    "uploaded_by": model_owner or "user",
+                    "uploaded_at": pd.Timestamp.now().isoformat(),
+                },
+                user=model_owner or "user",
+            )
+        except Exception as reg_exc:
+            # Do NOT silently swallow registration failures — log full traceback
+            try:
+                import traceback
+                print(f"[registration] registration FAILED for model {business_model_name}: {reg_exc}")
+                traceback.print_exc()
+                # also persist a short diagnostic so tests / CI can inspect it
+                try:
+                    (persistence.APP_DATA_DIR / "last_development_registration_error.json").write_text(
+                        json.dumps({"model_name": business_model_name, "error": str(reg_exc)}, default=str, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                # best-effort logging; never mask the original exception output
+                print(f"[registration] registration error: {reg_exc}")
+            # allow flow to continue; reg_result will be undefined or None
+            reg_result = None
+
+        # Find the created/updated entry in the in-memory store
+        created_entry = None
+        try:
+            mid = reg_result.get("model_id") if isinstance(reg_result, dict) else None
+            created_entry = next((m for m in store.get("development", []) if m.get("model_id") == mid), None) if mid else None
+        except Exception:
+            created_entry = None
+
+        # Log inventory path and counts immediately before saving
+        try:
+            inv_path = persistence.get_model_inventory_path()
+            before_count = len(store.get("development", []))
+            print(f"[registration] inventory_path: {inv_path.resolve()}")
+            print(f"[registration] before_development_count: {before_count}")
+            print(f"[registration] generated_model_id: {reg_result.get('model_id') if isinstance(reg_result, dict) else None}")
+            print(f"[registration] generated_model_name: {reg_result.get('model_name') if isinstance(reg_result, dict) else business_model_name}")
+        except Exception as _e:
+            print(f"[registration] pre-save logging failed: {_e}")
+
+        # Persist inventory (may raise) and log afterwards
+        try:
+            persistence.save_model_inventory(store)
+            after_count = len(store.get("development", []))
+            print(f"[registration] after_development_count: {after_count}")
+            print(f"[registration] save_model_inventory succeeded: {inv_path.resolve()}")
+        except Exception as e:
+            print(f"[registration] save_model_inventory FAILED: {e}")
+            raise
+
+        # Update the training artifact to include the assigned model_id and
+        # documentation path so artifacts reflect registered models.
+        try:
+            if isinstance(reg_result, dict) and run_id:
+                assigned_id = reg_result.get("model_id")
+                if assigned_id:
+                    result["model_id"] = assigned_id
+                    if created_entry and created_entry.get("documentation_path"):
+                        result["documentation_path"] = created_entry.get("documentation_path")
+                    # overwrite artifact with updated payload
+                    new_artifact_rel = persistence.save_artifact(persistence.DEV_PIPELINE_LOG, "training", run_id, result)
+                    print(f"[registration] updated training artifact for run {run_id}: {new_artifact_rel}")
+        except Exception as _e:
+            print(f"[registration] failed to update training artifact with model_id: {_e}")
     except Exception as e:
         import traceback
         print(f"[persistence] failed to update inventory from development: {e}")

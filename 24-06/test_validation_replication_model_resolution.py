@@ -5,6 +5,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import main as backend
 import persistence
+import csv
+import json
+
+
+def _ensure_single_training_artifact(model_name: str):
+    """Remove existing training log rows/artifacts for model_name and write a
+    single fresh training artifact row for the given model_name.
+    """
+    log_path = persistence.APP_DATA_DIR / persistence.DEV_PIPELINE_LOG
+    rows = persistence.read_log(persistence.DEV_PIPELINE_LOG)
+    kept = []
+    for r in rows:
+        summ = r.get('summary') or {}
+        if isinstance(summ, dict) and summ.get('model_name') == model_name:
+            # delete artifact file if present
+            ap = r.get('artifact_path')
+            if ap:
+                p = persistence.BACKEND_DIR / ap
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+            continue
+        kept.append(r)
+
+    # rewrite CSV keeping non-matching rows
+    if kept:
+        with open(log_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=["run_id", "timestamp", "stage", "summary", "artifact_path"])
+            writer.writeheader()
+            for r in kept:
+                row = {k: (json.dumps(r[k]) if k == 'summary' and isinstance(r[k], dict) else r.get(k, '')) for k in ["run_id", "timestamp", "stage", "summary", "artifact_path"]}
+                writer.writerow(row)
+    else:
+        # remove file entirely if no rows kept
+        try:
+            if log_path.exists():
+                log_path.unlink()
+        except Exception:
+            pass
+
+    # now create a single fresh artifact for this model_name
+    persistence.log_event(persistence.DEV_PIPELINE_LOG, stage="training", payload={"model_name": model_name}, full_payload={"model_name": model_name})
 
 
 def test_replication_model_resolution_keeps_business_identity_and_estimator_separate():
@@ -137,6 +181,9 @@ def test_register_validation_run_updates_placeholder_metadata_from_real_intake()
 def test_development_and_validation_register_separately_with_related_reference():
     store = {"development": [], "validation": [], "models": [], "data_sources": [], "history": []}
 
+    # create a training artifact so registration can link to it
+    _ensure_single_training_artifact("PD_Model_Internal_v1")
+
     development_result = persistence.register_development_model(
         store=store,
         business_model_name="PD_Model_Internal_v1",
@@ -211,6 +258,9 @@ def test_development_and_validation_register_separately_with_related_reference()
 def test_register_development_model_generates_real_pdf_documentation_for_model_report():
     store = {"models": [], "data_sources": [], "validation": [], "history": []}
 
+    # ensure a single training artifact exists for PD_RetailCredit_v2
+    _ensure_single_training_artifact("PD_RetailCredit_v2")
+
     persistence.register_development_model(
         store=store,
         business_model_name="PD_RetailCredit_v2",
@@ -237,6 +287,9 @@ def test_register_development_model_generates_real_pdf_documentation_for_model_r
         user="Harshad",
     )
 
+    # ensure a single training artifact exists for PD_RetailCredit_v2
+    _ensure_single_training_artifact("PD_RetailCredit_v2")
+
     model = store["models"][0]
     assert model["model_name"] == "PD_RetailCredit_v2"
     assert model["documentation_path"].endswith(".pdf")
@@ -247,6 +300,8 @@ def test_register_development_model_generates_real_pdf_documentation_for_model_r
 
 def test_register_development_model_persists_training_and_evaluation_metadata():
     store = {"models": [], "data_sources": [], "validation": [], "history": []}
+    # ensure a single training artifact exists for PD_RetailCredit_v4
+    _ensure_single_training_artifact("PD_RetailCredit_v4")
 
     persistence.register_development_model(
         store=store,
@@ -284,6 +339,9 @@ def test_register_development_model_persists_training_and_evaluation_metadata():
         },
         user="Harshad",
     )
+
+    # ensure a single training artifact exists for PD_RetailCredit_v4
+    _ensure_single_training_artifact("PD_RetailCredit_v4")
 
     model = store["models"][0]
     assert model["training_info"]["use_cv"] is True
@@ -383,6 +441,9 @@ def test_validation_run_leaves_development_record_unchanged_and_uses_validation_
 def test_development_and_validation_counts_change_independently():
     store = {"development": [], "validation": [], "models": [], "data_sources": [], "history": []}
 
+    # ensure a single training artifact exists for PD_Count_A
+    _ensure_single_training_artifact("PD_Count_A")
+
     persistence.register_development_model(
         store=store,
         business_model_name="PD_Count_A",
@@ -407,6 +468,8 @@ def test_development_and_validation_counts_change_independently():
         },
         user="Alice",
     )
+
+    
 
     assert len(store["development"]) == 1
     assert len(store["validation"]) == 0
@@ -441,6 +504,9 @@ def test_development_and_validation_counts_change_independently():
     assert len(store["development"]) == 1
     assert len(store["validation"]) == 1
 
+    # ensure a single training artifact exists for PD_Count_B
+    _ensure_single_training_artifact("PD_Count_B")
+
     persistence.register_development_model(
         store=store,
         business_model_name="PD_Count_B",
@@ -465,6 +531,7 @@ def test_development_and_validation_counts_change_independently():
         },
         user="Alice",
     )
+
 
     assert len(store["development"]) == 2
     assert len(store["validation"]) == 1
@@ -575,6 +642,9 @@ def test_register_validation_run_keeps_demo_b_reference_separate_from_dataset():
 def test_validation_record_is_distinct_from_development_record_and_keeps_ref_only():
     store = {"development": [], "validation": [], "models": [], "data_sources": [], "history": []}
 
+    # ensure a single training artifact exists for this development model
+    _ensure_single_training_artifact("PD_RetailCredit_v2")
+
     development = persistence.register_development_model(
         store=store,
         business_model_name="PD_RetailCredit_v2",
@@ -599,6 +669,8 @@ def test_validation_record_is_distinct_from_development_record_and_keeps_ref_onl
         },
         user="Harshad",
     )
+
+    
 
     validation = persistence.register_validation_run(
         store=store,

@@ -8,6 +8,9 @@ import persistence
 def test_duplicate_and_profile_fields_propagate():
     store = {"development": [], "models": [], "data_sources": [], "validation": [], "history": []}
 
+    # create a training artifact so registration can link to it
+    persistence.log_event(persistence.DEV_PIPELINE_LOG, stage="training", payload={"model_name": "TEST_DUP"}, full_payload={"model_name": "TEST_DUP"})
+
     persistence.register_development_model(
         store=store,
         business_model_name="TEST_DUP",
@@ -42,6 +45,9 @@ def test_feature_engineering_persisted_when_present():
 
     fe_summary = {"applied": True, "generated_columns": ["f_new_1", "f_new_2"]}
 
+    # create a training artifact so registration can link to it
+    persistence.log_event(persistence.DEV_PIPELINE_LOG, stage="training", payload={"model_name": "TEST_FE"}, full_payload={"model_name": "TEST_FE"})
+
     persistence.register_development_model(
         store=store,
         business_model_name="TEST_FE",
@@ -58,6 +64,9 @@ def test_feature_engineering_persisted_when_present():
 def test_explainability_artifact_attaches_and_regenerates_report(tmp_path):
     # register a development model and write last_development_registered.json
     store = {"development": [], "models": [], "data_sources": [], "validation": [], "history": []}
+    # create a training artifact for explainability linkage
+    persistence.log_event(persistence.DEV_PIPELINE_LOG, stage="training", payload={"model_name": "TEST_EXPL"}, full_payload={"model_name": "TEST_EXPL"})
+
     result = persistence.register_development_model(
         store=store,
         business_model_name="TEST_EXPL",
