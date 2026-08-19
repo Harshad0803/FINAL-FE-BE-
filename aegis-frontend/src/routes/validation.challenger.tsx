@@ -1,6 +1,8 @@
 import React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageHeader } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Card as UiCard } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowRight,
@@ -551,7 +553,7 @@ function ModelReplicationPanel({
   }, [scoreBins]);
 
   return (
-    <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+    <UiCard className="p-6 shadow-elegant">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold">Model Replication</h3>
@@ -941,7 +943,7 @@ function ModelReplicationPanel({
           )}
         </div>
       )}
-    </section>
+    </UiCard>
   );
 }
 
@@ -958,6 +960,10 @@ function Challenger() {
         title="Stage 3 — Model Replication & Performance Testing"
         description="Independently reproduce the developer's submitted model, verify results against the R4.1-R4.8 replication checks, and review its full performance profile on data the model has never seen."
       />
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Replication</Badge>
+        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Performance review</Badge>
+      </div>
 
       <ModelReplicationPanel activeSubTab={activeSubTab} setActiveSubTab={setActiveSubTab} />
 

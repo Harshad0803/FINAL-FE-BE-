@@ -4,8 +4,10 @@ import { useDataset } from "@/lib/app-context";
 import { formUpload } from "@/lib/api";
 import { useEffect, useMemo, useState } from "react";
 import PlotlyChart from "@/components/plotly-chart";
-import { AlertCircle, ArrowLeft, ArrowRight, Loader, Download, Printer, BarChart3, Microscope, Search, ClipboardList } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Loader, Download, Printer, BarChart3, Microscope, Search, ClipboardList, Lightbulb, AlertTriangle, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -495,6 +497,56 @@ function Explainability() {
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
       )}
+
+      {/* Figma-approved top area: global importance + individual prediction + insights */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="p-5 border-slate-200 bg-white">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">SHAP Feature Importance</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Mean |SHAP value| — global model explanation</p>
+            </div>
+            <div>
+              <Badge variant="outline" className="text-xs">{trainingResult?.model_name ?? 'Model'}</Badge>
+            </div>
+          </div>
+          <div className="h-64">
+            {/* Prefer SHAP summary when available, otherwise feature-importance figure */}
+            <PlotlyChart figure={(shapComputed && shapSummaryFigure) || importanceFigure} />
+          </div>
+          <div className="flex items-center gap-5 mt-2 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-600 inline-block" /> Positive impact (↑ PD)</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> Negative impact (↓ PD)</span>
+          </div>
+        </Card>
+
+        <Card className="p-5 border-slate-200 bg-white">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Individual Prediction</h3>
+              <p className="text-xs text-slate-400 mt-0.5">SHAP contribution per feature for one applicant</p>
+            </div>
+            <select value={sampleIdx} onChange={(e) => void changeSample(Math.max(0, Number(e.target.value)))} className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {Array.from({ length: Math.max(1, sampleCount) }).map((_, i) => (
+                <option key={i} value={i}>{`#${i}`}</option>
+              ))}
+            </select>
+          </div>
+          {data?.shap.sample_shap && data.shap.sample_shap.length > 0 ? (
+            <div className="h-64">
+              <PlotlyChart figure={sampleShapFigure} />
+            </div>
+          ) : (
+            <div className="p-3 bg-slate-50 rounded-xl mb-4 grid grid-cols-3 gap-3 text-xs">
+              <div><p className="text-slate-400">Customer index</p><p className="font-mono font-bold text-slate-900">{sampleIdx}</p></div>
+              <div><p className="text-slate-400">PD Score</p><p className="font-bold text-red-600">—</p></div>
+              <div><p className="text-slate-400">Decision</p><p className="font-semibold text-slate-900">—</p></div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      
 
       <Tabs defaultValue="importance" className="w-full">
         <TabsList>

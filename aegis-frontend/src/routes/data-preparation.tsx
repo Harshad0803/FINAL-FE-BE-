@@ -19,10 +19,12 @@ import { Separator } from "@/components/ui/separator";
 import {
   AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, CheckCircle2, ChevronDown, Download, Info,
   BarChart as BarChartIcon, Table as TableIcon, Brain, Loader2, Loader, RefreshCw, Trash2, Hash, Tag,
+  Search, TrendingUp, Workflow, PieChart, Percent, Database, Layers,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeFeatureRemovalProposal } from "@/lib/feature-removal";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/data-preparation")({
   head: () => ({ meta: [{ title: "Data Preparation & Feature Engineering — Aegis Credit" }] }),
@@ -78,6 +80,11 @@ function DataPreparation() {
 // ═══════════════════════════════════════════════════════════════════════
 
 const CLASS_DISTRIBUTION_COLORS = ["#065f46", "#10b981", "#6ee7b7", "#a7f3d0"];
+
+// Validated 2-slot categorical pair (blue/emerald) — ties the split chart's
+// class colors to the app's primary accent instead of the unrelated lime green.
+const SPLIT_CLASS_COLORS: Record<string, string> = { "0": "#059669", "1": "#2563EB" };
+const SPLIT_CLASS_FALLBACK = "#94A3B8";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -696,7 +703,9 @@ const TRANSFORM_LABELS: Record<string, string> = {
 const TRANSFORM_OPTIONS = ["none", "log1p", "yeo_johnson"];
 
 interface FeatureEngineeringResponse {
-  col_types?: Record<string, string>;
+  // Type -> column-list map (e.g. { numeric: [...], categorical: [...] }),
+  // not a per-column lookup — see resolveFeatureType() below for inversion.
+  col_types?: Record<string, string[]>;
   target_col?: string;
   task_type?: string;
   feature_engineering_plan?: any;
@@ -732,6 +741,464 @@ interface FeatureEngineeringResponse {
     gini?: number;
     source?: string;
   }>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dashboard visual primitives — presentation only. Every value they render
+// is passed in from real preprocessing/feature-engineering state; none of
+// them fetch data or hold data-shaping logic of their own.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Inverts feature_engineering_plan.col_types ({numeric:[...], categorical:[...]}
+// etc — a type→column-list map, not a per-column lookup) to find one column's
+// type. Names outside every bucket are engineered/derived columns (e.g. a
+// `_log`/`_woe`/`_bin` suffix or an interaction name) that never existed as a
+// raw column.
+function resolveFeatureType(colTypes: Record<string, string[]> | undefined, feature: string): string {
+  if (!colTypes) return "Unknown";
+  for (const [type, cols] of Object.entries(colTypes)) {
+    if (Array.isArray(cols) && cols.includes(feature)) {
+      return type.charAt(0).toUpperCase() + type.slice(1);
+    }
+  }
+  return "Engineered";
+}
+
+// missing_pct from the backend is a fraction (0–1), matching how the existing
+// Missing Value Treatment card already reads it.
+function missingSeverityColor(fraction: number): { bar: string; text: string } {
+  const pct = fraction * 100;
+  if (pct >= 8) return { bar: "bg-red-500", text: "text-red-700" };
+  if (pct >= 3) return { bar: "bg-amber-500", text: "text-amber-700" };
+  if (pct > 0) return { bar: "bg-emerald-500", text: "text-emerald-700" };
+  return { bar: "bg-slate-200", text: "text-slate-400" };
+}
+
+// Mirrors the thresholds severityBadge() already uses for the skew badge, so
+// the bar and the badge next to it always agree on severity.
+function skewBarColor(skew: number): string {
+  const abs = Math.abs(skew);
+  if (abs >= 2.0) return "bg-red-500";
+  if (abs >= 1.5) return "bg-amber-500";
+  return "bg-yellow-500";
+}
+
+function MiniBar({ fraction, colorClass }: { fraction: number; colorClass: string }) {
+  const width = Number.isFinite(fraction) ? Math.max(0, Math.min(100, fraction * 100)) : 0;
+  return (
+    <div className="h-1.5 min-w-[48px] flex-1 overflow-hidden rounded-full bg-slate-100">
+      <div className={cn("h-full rounded-full transition-all", colorClass)} style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
+function KpiTile({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone = "primary",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "primary" | "amber" | "emerald" | "rose" | "violet";
+}) {
+  const toneClasses: Record<string, string> = {
+    primary: "bg-blue-500/10 text-blue-600",
+    amber: "bg-amber-500/10 text-amber-600",
+    emerald: "bg-emerald-500/10 text-emerald-600",
+    rose: "bg-rose-500/10 text-rose-600",
+    violet: "bg-violet-500/10 text-violet-600",
+  };
+  return (
+    <div className="bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", toneClasses[tone])}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      </div>
+      <div className="mt-2 text-2xl font-bold tabular-nums text-slate-900">{value}</div>
+      {sub && <div className="mt-0.5 truncate text-[11px] text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+function KpiStrip({ tiles }: { tiles: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub?: string; tone?: "primary" | "amber" | "emerald" | "rose" | "violet" }> }) {
+  return (
+    <div
+      className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0"
+    >
+      {tiles.map((tile) => (
+        <KpiTile key={tile.label} {...tile} />
+      ))}
+    </div>
+  );
+}
+
+const SPLIT_COLORS = [
+  { bg: "bg-blue-600", border: "border-blue-600", text: "text-blue-600" },
+  { bg: "bg-violet-600", border: "border-violet-600", text: "text-violet-600" },
+  { bg: "bg-emerald-600", border: "border-emerald-600", text: "text-emerald-600" },
+] as const;
+
+function SplitProportionBar({
+  trainPct, valPct, testPct, trainN, valN, testN,
+}: {
+  trainPct: number | null; valPct: number | null; testPct: number | null;
+  trainN: number | null; valN: number | null; testN: number | null;
+}) {
+  const segments = [
+    { label: "Train", pct: trainPct, n: trainN, role: "Model fitting", c: SPLIT_COLORS[0] },
+    { label: "Validation", pct: valPct, n: valN, role: "Hyperparameter tuning", c: SPLIT_COLORS[1] },
+    { label: "Test", pct: testPct, n: testN, role: "Final evaluation", c: SPLIT_COLORS[2] },
+  ];
+  const hasData = segments.every((s) => s.pct !== null);
+
+  return (
+    <div>
+      <div className="flex h-8 gap-0.5 overflow-hidden rounded-lg">
+        {hasData ? (
+          segments.map((s) => (
+            <div
+              key={s.label}
+              className={cn("flex items-center justify-center text-[10.5px] font-bold text-white", s.c.bg)}
+              style={{ width: `${s.pct}%` }}
+              title={`${s.label}: ${s.pct?.toFixed(1)}%`}
+            >
+              {(s.pct ?? 0) > 12 ? s.label.slice(0, 5).toUpperCase() : ""}
+            </div>
+          ))
+        ) : (
+          <div className="flex-1 rounded-lg bg-slate-100" />
+        )}
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {segments.map((s) => (
+          <div key={s.label} className={cn("rounded-lg border-l-4 bg-slate-50 p-3", s.c.border)}>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-lg font-bold tabular-nums text-slate-900">{s.n !== null ? s.n.toLocaleString() : "—"}</span>
+              {s.pct !== null && <span className={cn("text-xs font-bold", s.c.text)}>{s.pct.toFixed(1)}%</span>}
+            </div>
+            <div className="text-xs font-semibold text-slate-900">{s.label}</div>
+            <div className="text-[11px] text-slate-500">{s.role}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DataQualityDonut({ completeness }: { completeness: number | null }) {
+  const radius = 34;
+  const circumference = 2 * Math.PI * radius;
+  const pct = completeness !== null ? Math.max(0, Math.min(100, completeness)) : 0;
+  const offset = circumference - (pct / 100) * circumference;
+  return (
+    <div className="relative flex h-20 w-20 shrink-0 items-center justify-center">
+      <svg width="80" height="80" className="-rotate-90">
+        <circle cx="40" cy="40" r={radius} fill="none" stroke="#f1f5f9" strokeWidth="7" />
+        {completeness !== null && (
+          <circle
+            cx="40" cy="40" r={radius} fill="none" stroke="#10b981" strokeWidth="7"
+            strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+          />
+        )}
+      </svg>
+      <div className="absolute text-center">
+        <div className="text-base font-bold text-slate-900">{completeness !== null ? `${completeness.toFixed(0)}%` : "—"}</div>
+        <div className="text-[8.5px] font-semibold uppercase tracking-wide text-slate-500">Complete</div>
+      </div>
+    </div>
+  );
+}
+
+function DataQualitySnapshot({
+  completeness, duplicateRate, outlierColumnCount, isImbalanced, imbalanceRatio, leakageColumnCount, dateFieldCount,
+}: {
+  completeness: number | null;
+  duplicateRate: number | null;
+  outlierColumnCount: number | null;
+  isImbalanced: boolean | null;
+  imbalanceRatio: number | null;
+  leakageColumnCount: number | null;
+  dateFieldCount: number | null;
+}) {
+  const rows: Array<{ label: string; display: string; status: "ok" | "warn" | "neutral" }> = [
+    { label: "Duplicate rows", display: duplicateRate !== null ? `${duplicateRate}%` : "—", status: duplicateRate === null ? "neutral" : duplicateRate > 1 ? "warn" : "ok" },
+    { label: "Outlier columns", display: outlierColumnCount !== null ? String(outlierColumnCount) : "—", status: outlierColumnCount === null ? "neutral" : outlierColumnCount > 0 ? "warn" : "ok" },
+    { label: "Target balance", display: isImbalanced === null ? "—" : isImbalanced ? `${imbalanceRatio ?? "?"}:1` : "Balanced", status: isImbalanced === null ? "neutral" : isImbalanced ? "warn" : "ok" },
+    { label: "Leakage risk columns", display: leakageColumnCount !== null ? String(leakageColumnCount) : "—", status: leakageColumnCount === null ? "neutral" : leakageColumnCount > 0 ? "warn" : "ok" },
+    { label: "Date fields checked", display: dateFieldCount !== null ? (dateFieldCount > 0 ? String(dateFieldCount) : "None") : "—", status: "neutral" },
+  ];
+  const dotClass: Record<string, string> = { ok: "bg-emerald-500", warn: "bg-amber-500", neutral: "bg-slate-300" };
+
+  return (
+    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+            <PieChart className="h-3.5 w-3.5 text-slate-400" />
+            Data Quality Snapshot
+          </div>
+          <div className="text-xs text-slate-500">From profiling diagnostics</div>
+        </div>
+        <DataQualityDonut completeness={completeness} />
+      </div>
+      <div className="mt-5 space-y-2.5">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center gap-2.5">
+            <span className={cn("h-2 w-2 shrink-0 rounded-full", dotClass[r.status])} />
+            <span className="flex-1 text-xs font-medium text-slate-600">{r.label}</span>
+            <span className="text-xs font-bold tabular-nums text-slate-900">{r.display}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const PIPELINE_CHIP_COLORS = ["bg-slate-600", "bg-sky-600", "bg-violet-600", "bg-blue-600", "bg-emerald-600"];
+
+function PipelineFlow({ stages }: { stages: Array<{ label: string; value: number | null; sub?: string }> }) {
+  const anyData = stages.some((s) => s.value !== null);
+  if (!anyData) return null;
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-800 p-5 shadow-sm">
+      <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
+        <Workflow className="h-4 w-4 text-slate-400" />
+        Feature Engineering Pipeline
+      </div>
+      <div className="mt-1 text-xs text-slate-400">End-to-end preprocessing workflow, in order</div>
+      <div className="mt-5 flex items-center gap-1 overflow-x-auto pb-1">
+        {stages.map((s, i) => (
+          <div key={s.label} className="flex items-center">
+            <div className="flex flex-col items-center gap-1.5">
+              <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 text-sm font-bold text-white", PIPELINE_CHIP_COLORS[i % PIPELINE_CHIP_COLORS.length])}>
+                {s.value !== null ? s.value : "—"}
+              </div>
+              <div className="text-center">
+                <div className="whitespace-nowrap text-[10.5px] font-semibold text-slate-200">{s.label}</div>
+                {s.sub && <div className="whitespace-nowrap text-[9.5px] text-slate-500">{s.sub}</div>}
+              </div>
+            </div>
+            {i < stages.length - 1 && <ArrowRight className="mx-2 mb-5 h-3.5 w-3.5 shrink-0 text-slate-600" />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TransformationsAppliedCard({ rows }: { rows: Array<{ transform?: string }> }) {
+  if (!rows || rows.length === 0) return null;
+  const labelFor = (t?: string) => {
+    if (!t || t === "-" || t === "none") return "No transform";
+    if (t === "log1p") return "Log transform";
+    if (t === "yeo_johnson") return "Yeo-Johnson";
+    return t;
+  };
+  const counts = new Map<string, number>();
+  rows.forEach((r) => {
+    const label = labelFor(r.transform);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+  const palette = ["bg-blue-600", "bg-violet-600", "bg-emerald-600", "bg-slate-300"];
+  const entries = Array.from(counts.entries());
+  const total = rows.length;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-sm font-semibold text-slate-900">Transformations Applied</div>
+      <div className="text-xs text-slate-500">
+        {total} feature{total === 1 ? "" : "s"} across {entries.length} strateg{entries.length === 1 ? "y" : "ies"}
+      </div>
+      <div className="mt-4 flex h-3 gap-0.5 overflow-hidden rounded-full">
+        {entries.map(([label, count], i) => (
+          <div key={label} className={palette[i % palette.length]} style={{ width: `${(count / total) * 100}%` }} title={`${label}: ${count}`} />
+        ))}
+      </div>
+      <div className="mt-4 space-y-2">
+        {entries.map(([label, count], i) => (
+          <div key={label} className="flex items-center gap-2.5">
+            <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", palette[i % palette.length])} />
+            <span className="flex-1 text-xs font-medium text-slate-600">{label}</span>
+            <span className="text-xs font-bold tabular-nums text-slate-900">{count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type FeatureOverviewRow = {
+  feature: string;
+  type: string;
+  iv: number | null;
+  gini: number | null;
+  missingPct: number | null;
+  status: "selected" | "review" | "removed";
+};
+
+const FEATURE_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  selected: { label: "Selected", className: "bg-emerald-100 text-emerald-700" },
+  review: { label: "Review", className: "bg-amber-100 text-amber-700" },
+  removed: { label: "Removed", className: "bg-rose-100 text-rose-700" },
+};
+
+function FeatureOverviewTable({ rows }: { rows: FeatureOverviewRow[] }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "selected" | "review" | "removed">("all");
+
+  const filtered = rows.filter((r) => {
+    const matchesSearch = r.feature.toLowerCase().includes(search.toLowerCase());
+    const matchesFilter = filter === "all" || r.status === filter;
+    return matchesSearch && matchesFilter;
+  });
+
+  const counts = {
+    selected: rows.filter((r) => r.status === "selected").length,
+    review: rows.filter((r) => r.status === "review").length,
+    removed: rows.filter((r) => r.status === "removed").length,
+  };
+
+  const ivMax = Math.max(0.1, ...rows.map((r) => r.iv ?? 0));
+  const giniMax = Math.max(0.1, ...rows.map((r) => Math.abs(r.gini ?? 0)));
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Feature Overview</div>
+            <div className="mt-1 flex flex-wrap gap-3 text-[11.5px] font-semibold">
+              <span className="text-emerald-700">{counts.selected} selected</span>
+              <span className="text-amber-700">{counts.review} review</span>
+              <span className="text-rose-700">{counts.removed} removed</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search features…"
+                className="h-8 w-44 rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 text-xs text-slate-700 outline-none focus:border-blue-400"
+              />
+            </div>
+            {(["all", "selected", "review", "removed"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setFilter(v)}
+                className={cn(
+                  "rounded-md border px-2.5 py-1 text-[11px] font-semibold capitalize transition-colors",
+                  filter === v ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300",
+                )}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="p-6 text-center text-sm text-slate-500">No feature-level data available for this dataset yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-50">
+                {["Feature", "Type", "IV", "Gini", "Missing %", "Status"].map((col) => (
+                  <th key={col} className="whitespace-nowrap px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={r.feature} className={cn("border-t border-slate-100", i % 2 === 1 && "bg-slate-50/40")}>
+                  <td className="px-4 py-2.5 font-mono text-xs font-semibold text-slate-900">{r.feature}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600">{r.type}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {r.iv !== null ? (
+                      <div className="flex items-center gap-2">
+                        <span className="w-9 shrink-0 font-bold tabular-nums text-slate-900">{r.iv.toFixed(2)}</span>
+                        <MiniBar fraction={r.iv / ivMax} colorClass="bg-blue-600" />
+                      </div>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {r.gini !== null ? (
+                      <div className="flex items-center gap-2">
+                        <span className="w-9 shrink-0 font-bold tabular-nums text-slate-900">{r.gini.toFixed(2)}</span>
+                        <MiniBar fraction={Math.abs(r.gini) / giniMax} colorClass="bg-violet-600" />
+                      </div>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {r.missingPct !== null ? (
+                      <span className={cn("font-semibold tabular-nums", missingSeverityColor(r.missingPct).text)}>{(r.missingPct * 100).toFixed(1)}%</span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10.5px] font-semibold", FEATURE_STATUS_BADGE[r.status].className)}>{FEATURE_STATUS_BADGE[r.status].label}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div className="p-6 text-center text-sm text-slate-500">No features match this search/filter.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatureImportanceBars({ items, metricLabel }: { items: Array<{ name: string; score: number }>; metricLabel: string }) {
+  if (items.length === 0) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+          <TrendingUp className="h-3.5 w-3.5 text-slate-400" />
+          Feature Importance
+        </div>
+        <div className="mt-4 text-sm text-slate-500">No importance scores are available for this dataset or task type yet.</div>
+      </div>
+    );
+  }
+  const max = Math.max(...items.map((i) => Math.abs(i.score)), 0.01);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+        <TrendingUp className="h-3.5 w-3.5 text-slate-400" />
+        Feature Importance
+      </div>
+      <div className="text-xs text-slate-500">{metricLabel}</div>
+      <div className="mt-5 space-y-2.5">
+        {items.map((item, i) => (
+          <div key={item.name} className="flex items-center gap-3">
+            <span className="w-4 shrink-0 text-right text-[10px] font-bold text-slate-400">{i + 1}</span>
+            <span className="w-40 shrink-0 truncate font-mono text-[11.5px] font-semibold text-slate-700" title={item.name}>{item.name}</span>
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-700 to-blue-500"
+                style={{ width: `${(Math.abs(item.score) / max) * 100}%` }}
+              />
+            </div>
+            <span className="w-12 shrink-0 text-right text-xs font-bold tabular-nums text-slate-900">{item.score.toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function PreprocessingFeaturesTab({ onBackToProfiling }: { onBackToProfiling: () => void }) {
@@ -963,6 +1430,7 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
   const classDistributionFigure = useMemo(() => {
     if (!classDistributionData || classDistributionData.length === 0) return null;
     const x = classDistributionData.map((d: any) => d.split ?? "");
+    const labelText = (value: number) => (value >= 0.08 ? `${Math.round(value * 100)}%` : "");
 
     const traces = [
       {
@@ -970,25 +1438,46 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
         name: "Class 0",
         x,
         y: classDistributionData.map((row: any) => Number(row["0"] ?? 0)),
-        marker: { color: "#65A30D" },
-        hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>",
+        text: classDistributionData.map((row: any) => labelText(Number(row["0"] ?? 0))),
+        textposition: "inside",
+        insidetextanchor: "middle",
+        textfont: { color: "#ffffff", size: 12, family: "Inter, ui-sans-serif, system-ui, sans-serif" },
+        marker: { color: SPLIT_CLASS_COLORS["0"], line: { color: "#ffffff", width: 2 } },
+        hovertemplate: "Class 0 · %{y:.1%}<extra></extra>",
       },
       {
         type: "bar",
         name: "Class 1",
         x,
         y: classDistributionData.map((row: any) => Number(row["1"] ?? 0)),
-        marker: { color: "#84CC16" },
-        hovertemplate: "%{x}<br>%{y:.1%}<extra></extra>",
+        text: classDistributionData.map((row: any) => labelText(Number(row["1"] ?? 0))),
+        textposition: "inside",
+        insidetextanchor: "middle",
+        textfont: { color: "#ffffff", size: 12, family: "Inter, ui-sans-serif, system-ui, sans-serif" },
+        marker: { color: SPLIT_CLASS_COLORS["1"], line: { color: "#ffffff", width: 2 }, cornerradius: 4 },
+        hovertemplate: "Class 1 · %{y:.1%}<extra></extra>",
       },
     ];
 
     const layout: any = {
       barmode: "stack",
-      margin: { t: 10, r: 20, l: 60, b: 60 },
-      xaxis: { title: "", automargin: true },
-      yaxis: { title: "", tickformat: ".0%", automargin: true, range: [0, 1] },
-      legend: { orientation: "h", y: 1.12 },
+      bargap: 0.55,
+      showlegend: false,
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      font: { family: "Inter, ui-sans-serif, system-ui, sans-serif", size: 12, color: "#64748B" },
+      margin: { t: 10, r: 12, l: 44, b: 32 },
+      xaxis: { title: "", automargin: true, showgrid: false, linecolor: "#E2E8F0", tickfont: { color: "#64748B" } },
+      yaxis: {
+        title: "",
+        tickformat: ".0%",
+        dtick: 0.25,
+        automargin: true,
+        range: [0, 1],
+        gridcolor: "#E2E8F0",
+        zeroline: false,
+        tickfont: { color: "#64748B" },
+      },
     };
 
     return { data: traces, layout };
@@ -1031,16 +1520,54 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
     return { label: "Mild skew", className: "bg-yellow-500/15 text-yellow-700 border-yellow-500/30" };
   };
 
+  const totalRows = splitStats.total ?? (
+    splitStats.train_n != null && splitStats.val_n != null && splitStats.test_n != null
+      ? splitStats.train_n + splitStats.val_n + splitStats.test_n
+      : null
+  );
+
+  // ── Data Quality Snapshot — reuses the same profiling diagnostics already
+  //    shown on the Profiling tab, so this recap needs no new data. ──
+  const missingPctValue: number | null = profile?.missing_percentage ?? null;
+  const completeness = missingPctValue !== null ? 100 - missingPctValue : null;
+  const duplicateRateValue: number | null = profile?.duplicate_rate ?? null;
+  const outlierColumnCount = profile?.outlier_analysis
+    ? Object.values(profile.outlier_analysis as Record<string, any>).filter((info: any) => (info?.outlier_fraction ?? 0) > 0).length
+    : null;
+  const isImbalanced: boolean | null = profile?.target_summary?.is_imbalanced ?? null;
+  const imbalanceRatio: number | null = profile?.target_summary?.imbalance_ratio ?? null;
+  const leakageColumnCount = Array.isArray(profile?.leakage_risk_cols) ? profile.leakage_risk_cols.length : null;
+  const dateFieldCount = profile?.date_integrity ? Object.keys(profile.date_integrity).length : null;
+
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="text-sm font-semibold">Step 3 — Preprocessing Config &amp; Train/Val/Test Split</div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Finalize X/y, then split immediately so every learned statistic comes from training data only.
-        </p>
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-sky-900 to-blue-800 p-6 text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-sky-200">Step 3</div>
+            <h3 className="mt-2 text-2xl font-semibold">Preprocessing Config &amp; Split Strategy</h3>
+            <p className="mt-2 max-w-2xl text-sm text-slate-200">
+              Finalize X/y, then split before any feature engineering so every transformation learns only from train data.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={onBackToProfiling} className="bg-white/10 text-white hover:bg-white/15 border border-white/20">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Profiling
+          </Button>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-elegant border-l-4 border-blue-500/80 bg-blue-500/10">
+      <KpiStrip
+        tiles={[
+          { icon: Database, label: "Total Records", value: totalRows !== null ? totalRows.toLocaleString() : "—", sub: "Rows across train/val/test", tone: "primary" },
+          { icon: Percent, label: "Missing Values", value: missingPctValue !== null ? `${missingPctValue}%` : "—", sub: profile?.missing_cells != null ? `${Number(profile.missing_cells).toLocaleString()} cells` : undefined, tone: "amber" },
+          { icon: Trash2, label: "Duplicate Rows", value: profile?.duplicate_rows != null ? String(profile.duplicate_rows) : "—", sub: duplicateRateValue !== null ? `${duplicateRateValue}% of rows` : undefined, tone: "rose" },
+          { icon: AlertTriangle, label: "Columns Flagged", value: String(missingProposalEntries.length), sub: "Need a missing-value decision", tone: "amber" },
+          { icon: BarChartIcon, label: "Skew Transforms", value: String(transformDecisions.length), sub: "Recommended on numeric columns", tone: "violet" },
+        ]}
+      />
+
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
         <div className="text-sm font-semibold text-blue-900">Leakage control</div>
         <p className="mt-2 text-sm text-blue-900/90">
           The dataset is split before any feature engineering. Missing-value treatment, imputation strategy,
@@ -1049,80 +1576,84 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-          <div className="grid gap-4">
-            <div>
-              <div className="text-sm font-medium">Test Size (%)</div>
-              <div className="mt-2 flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.45}
-                  step={0.05}
-                  value={testSize}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    const maxVal = Math.min(value, 0.95 - valSize);
-                    setTestSize(maxVal);
-                  }}
-                  className="flex-1"
-                />
-                <div className="w-16 text-right text-sm font-mono">{Math.round(testSize * 100)}%</div>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">{splitStats.test_n ? `${splitStats.test_n.toLocaleString()} samples` : "Test split count"}</div>
-            </div>
-
-            <div>
-              <div className="text-sm font-medium">Validation Size (%)</div>
-              <div className="mt-2 flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.45}
-                  step={0.05}
-                  value={valSize}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    const maxVal = Math.min(value, 0.95 - testSize);
-                    setValSize(maxVal);
-                  }}
-                  className="flex-1"
-                />
-                <div className="w-16 text-right text-sm font-mono">{Math.round(valSize * 100)}%</div>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">{splitStats.val_n ? `${splitStats.val_n.toLocaleString()} samples` : "Validation split count"}</div>
-            </div>
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-base font-semibold text-slate-900">Split configuration</div>
+          <div className="mt-4">
+            <SplitProportionBar
+              trainPct={splitStats.train_pct ?? null}
+              valPct={splitStats.val_pct ?? null}
+              testPct={splitStats.test_pct ?? null}
+              trainN={splitStats.train_n ?? null}
+              valN={splitStats.val_n ?? null}
+              testN={splitStats.test_n ?? null}
+            />
           </div>
+          <div className="mt-6 grid gap-5">
+            <div>
+              <div className="flex items-center justify-between text-sm font-medium text-slate-700">
+                <span>Test Size</span>
+                <span className="font-mono text-slate-900">{Math.round(testSize * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={0.45}
+                step={0.05}
+                value={testSize}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  const maxVal = Math.min(value, 0.95 - valSize);
+                  setTestSize(maxVal);
+                }}
+                className="mt-3 w-full accent-blue-600"
+              />
+              <div className="mt-2 text-xs text-slate-500">{splitStats.test_n ? `${splitStats.test_n.toLocaleString()} samples` : "Test split count"}</div>
+            </div>
 
-          <div className="grid gap-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-xl border border-border bg-background p-4 text-center">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Train</div>
-                <div className="mt-2 text-2xl font-semibold tabular-nums">{splitStats.train_n?.toLocaleString() ?? "—"}</div>
+            <div>
+              <div className="flex items-center justify-between text-sm font-medium text-slate-700">
+                <span>Validation Size</span>
+                <span className="font-mono text-slate-900">{Math.round(valSize * 100)}%</span>
               </div>
-              <div className="rounded-xl border border-border bg-background p-4 text-center">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Validation</div>
-                <div className="mt-2 text-2xl font-semibold tabular-nums">{splitStats.val_n?.toLocaleString() ?? "—"}</div>
-              </div>
-              <div className="rounded-xl border border-border bg-background p-4 text-center">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground">Test</div>
-                <div className="mt-2 text-2xl font-semibold tabular-nums">{splitStats.test_n?.toLocaleString() ?? "—"}</div>
-              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={0.45}
+                step={0.05}
+                value={valSize}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  const maxVal = Math.min(value, 0.95 - testSize);
+                  setValSize(maxVal);
+                }}
+                className="mt-3 w-full accent-blue-600"
+              />
+              <div className="mt-2 text-xs text-slate-500">{splitStats.val_n ? `${splitStats.val_n.toLocaleString()} samples` : "Validation split count"}</div>
             </div>
           </div>
         </div>
+
+        <DataQualitySnapshot
+          completeness={completeness}
+          duplicateRate={duplicateRateValue}
+          outlierColumnCount={outlierColumnCount}
+          isImbalanced={isImbalanced}
+          imbalanceRatio={imbalanceRatio}
+          leakageColumnCount={leakageColumnCount}
+          dateFieldCount={dateFieldCount}
+        />
       </div>
 
       {loading && (
-        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          🔧 Building adaptive preprocessing pipeline...
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+          Building adaptive preprocessing pipeline...
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-destructive">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 shadow-sm">
           {error}
         </div>
       )}
@@ -1130,17 +1661,17 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
       {preprocess ? (
         <>
           {classDistributionData.length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-              <div className="flex items-center justify-between gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="text-sm font-semibold">Class Distribution per Split (stratified)</div>
-                  <div className="mt-2 text-sm text-muted-foreground">Train, validation and test split proportions by class.</div>
+                  <div className="text-base font-semibold text-slate-900">Class Distribution per Split</div>
+                  <div className="mt-1 text-sm text-slate-500">Train, validation and test split proportions by class.</div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex flex-wrap gap-2 text-xs">
                   {classKeys.map((label) => (
-                    <div key={label} className="inline-flex items-center gap-2 rounded-full border border-border px-2 py-1 text-muted-foreground">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: label === "Y" ? "#65A30D" : label === "N" ? "#84CC16" : "#94a3b8" }} />
-                      {label}
+                    <div key={label} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: SPLIT_CLASS_COLORS[String(label)] ?? SPLIT_CLASS_FALLBACK }} />
+                      Class {label}
                     </div>
                   ))}
                 </div>
@@ -1153,332 +1684,326 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
             </div>
           )}
 
-          {/* ── Missing Value Treatment ────────────────────────────────── */}
-          <Card className="shadow-elegant">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Brain className="h-4 w-4" />
-                Missing Value Treatment
-              </CardTitle>
-              <CardDescription>
-                Each column is classified by its data shape alone — no column-name guessing. Review the
-                proposal and override anything before it&apos;s applied.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {missingProposalEntries.length === 0 ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  No missing values in the training features — imputation not required.
-                </div>
-              ) : (
-                <>
-                  <div className="rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground leading-relaxed">
-                    <span className="font-medium text-foreground">Unknown category</span> — categorical column, filled with an explicit &apos;Unknown&apos; value.{" "}
-                    <span className="font-medium text-foreground">Zero-fill</span> — binary or structural-zero numeric column.{" "}
-                    <span className="font-medium text-foreground">Statistical</span> — genuinely missing numeric values, filled jointly via MICE, KNN, or median.{" "}
-                    <span className="font-medium text-foreground">Review</span> — over {Math.round(reviewMissingThreshold * 100)}% missing, too sparse to impute reliably.
+          <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+            <Card className="shadow-sm border-slate-200 bg-white">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm text-slate-900">
+                  <Brain className="h-4 w-4 text-blue-600" />
+                  Missing Value Treatment
+                </CardTitle>
+                <CardDescription>
+                  Each column is classified by its data shape alone — no column-name guessing. Review the
+                  proposal and override anything before it&apos;s applied.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {missingProposalEntries.length === 0 ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    No missing values in the training features — imputation not required.
                   </div>
+                ) : (
+                  <>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 leading-relaxed">
+                      <span className="font-medium text-slate-900">Unknown category</span> — categorical column, filled with an explicit &apos;Unknown&apos; value. <span className="font-medium text-slate-900">Zero-fill</span> — binary or structural-zero numeric column. <span className="font-medium text-slate-900">Statistical</span> — genuinely missing numeric values, filled jointly via MICE, KNN, or median. <span className="font-medium text-slate-900">Review</span> — over {Math.round(reviewMissingThreshold * 100)}% missing, too sparse to impute reliably.
+                    </div>
 
-                  {missingProposalEntries
-                    .sort((a, b) => (b[1].evidence?.missing_pct ?? 0) - (a[1].evidence?.missing_pct ?? 0))
-                    .map(([col, info]) => {
-                      const isDropped = Boolean(dropCols[col]);
-                      const currentTreatment = treatmentOverrides[col] ?? info.treatment;
-                      const missingPct = info.evidence?.missing_pct ?? 0;
-                      const isReviewFlag = info.treatment === "review_flag";
+                    {missingProposalEntries
+                      .sort((a, b) => (b[1].evidence?.missing_pct ?? 0) - (a[1].evidence?.missing_pct ?? 0))
+                      .map(([col, info]) => {
+                        const isDropped = Boolean(dropCols[col]);
+                        const currentTreatment = treatmentOverrides[col] ?? info.treatment;
+                        const missingPct = info.evidence?.missing_pct ?? 0;
+                        const isReviewFlag = info.treatment === "review_flag";
 
-                      return (
-                        <div
-                          key={col}
-                          className={`rounded-lg border p-3 ${isReviewFlag ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-background"}`}
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-sm">{col}</span>
-                            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                              {(missingPct * 100).toFixed(1)}% missing
-                            </span>
-                            {isReviewFlag && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-700">
-                                <AlertTriangle className="h-3 w-3" />
-                                Sparse
+                        return (
+                          <div
+                            key={col}
+                            className={`rounded-xl border p-3 ${isReviewFlag ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-sm text-slate-900">{col}</span>
+                              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
+                                {(missingPct * 100).toFixed(1)}% missing
                               </span>
-                            )}
-                          </div>
-                          <p className="mt-1.5 text-xs text-muted-foreground">{info.reason}</p>
-
-                          {isReviewFlag && (
-                            <div className="mt-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleDropImpact(col)}
-                                className="text-xs font-medium text-amber-700 underline decoration-dotted underline-offset-2 hover:text-amber-800"
-                              >
-                                {dropImpactOpen[col] ? "Hide" : "Show"} impact of dropping this feature
-                              </button>
-
-                              {dropImpactOpen[col] && (
-                                <div className="mt-2 rounded-lg border border-border bg-background p-3">
-                                  {dropImpactLoading[col] ? (
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      Analyzing impact of dropping {col}...
-                                    </div>
-                                  ) : dropImpactError[col] ? (
-                                    <div className="text-xs text-red-600">{dropImpactError[col]}</div>
-                                  ) : dropImpact[col] ? (
-                                    <>
-                                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                        <div>
-                                          <div className="text-xs text-muted-foreground">Predictive importance (IV)</div>
-                                          <div className="text-sm font-semibold tabular-nums">
-                                            {dropImpact[col].iv !== null && dropImpact[col].iv !== undefined
-                                              ? dropImpact[col].iv.toFixed(3)
-                                              : "n/a"}
-                                          </div>
-                                          {dropImpact[col].iv_label && (
-                                            <div className="text-xs text-muted-foreground">{dropImpact[col].iv_label}</div>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <div className="text-xs text-muted-foreground">Most correlated feature</div>
-                                          {dropImpact[col].redundant_col ? (
-                                            <>
-                                              <div className="text-sm font-semibold">{dropImpact[col].redundant_col}</div>
-                                              <div className="text-xs text-muted-foreground">
-                                                {"|corr|="}{Math.abs(dropImpact[col].redundant_corr).toFixed(2)}
-                                              </div>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <div className="text-sm font-semibold">None found</div>
-                                              <div className="text-xs text-muted-foreground">no redundancy ≥ 0.60</div>
-                                            </>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div
-                                        className={`mt-3 rounded-md border-l-4 p-2.5 text-xs ${
-                                          dropImpact[col].verdict_tone === "safe"
-                                            ? "border-emerald-500 bg-emerald-500/5 text-emerald-900"
-                                            : dropImpact[col].verdict_tone === "caution"
-                                            ? "border-amber-500 bg-amber-500/5 text-amber-900"
-                                            : dropImpact[col].verdict_tone === "risk"
-                                            ? "border-red-500 bg-red-500/5 text-red-900"
-                                            : "border-border bg-background text-muted-foreground"
-                                        }`}
-                                      >
-                                        <span className="font-medium">Verdict: </span>
-                                        {dropImpact[col].verdict}
-                                      </div>
-                                    </>
-                                  ) : null}
-                                </div>
+                              {isReviewFlag && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Sparse
+                                </span>
                               )}
                             </div>
-                          )}
-
-                          <div className="mt-3 flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground">Treatment</span>
-                              <Select
-                                value={currentTreatment}
-                                disabled={isDropped}
-                                onValueChange={(value) =>
-                                  setTreatmentOverrides((prev) => ({ ...prev, [col]: value }))
-                                }
-                              >
-                                <SelectTrigger className="h-8 w-[180px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80 disabled:border-primary/40 disabled:bg-primary/40 disabled:text-primary-foreground/70">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {TREATMENT_OPTIONS.map((opt) => (
-                                    <SelectItem key={opt} value={opt}>{TREATMENT_LABELS[opt]}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                            <div className="mt-2 flex items-center gap-2">
+                              <MiniBar fraction={missingPct} colorClass={missingSeverityColor(missingPct).bar} />
                             </div>
+                            <p className="mt-1.5 text-xs text-slate-600">{info.reason}</p>
 
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                              <Checkbox
-                                checked={isDropped}
-                                onCheckedChange={(checked) =>
-                                  setDropCols((prev) => ({ ...prev, [col]: Boolean(checked) }))
-                                }
-                              />
-                              Drop variable — removed entirely, not used in training or evaluation
-                            </label>
+                            {isReviewFlag && (
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDropImpact(col)}
+                                  className="text-xs font-medium text-amber-700 underline decoration-dotted underline-offset-2 hover:text-amber-800"
+                                >
+                                  {dropImpactOpen[col] ? "Hide" : "Show"} impact of dropping this feature
+                                </button>
+
+                                {dropImpactOpen[col] && (
+                                  <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3">
+                                    {dropImpactLoading[col] ? (
+                                      <div className="flex items-center gap-2 text-xs text-slate-600">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Analyzing impact of dropping {col}...
+                                      </div>
+                                    ) : dropImpactError[col] ? (
+                                      <div className="text-xs text-red-600">{dropImpactError[col]}</div>
+                                    ) : dropImpact[col] ? (
+                                      <>
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                          <div>
+                                            <div className="text-xs text-slate-500">Predictive importance (IV)</div>
+                                            <div className="text-sm font-semibold tabular-nums text-slate-900">
+                                              {dropImpact[col].iv !== null && dropImpact[col].iv !== undefined
+                                                ? dropImpact[col].iv.toFixed(3)
+                                                : "n/a"}
+                                            </div>
+                                            {dropImpact[col].iv_label && (
+                                              <div className="text-xs text-slate-500">{dropImpact[col].iv_label}</div>
+                                            )}
+                                          </div>
+                                          <div>
+                                            <div className="text-xs text-slate-500">Most correlated feature</div>
+                                            {dropImpact[col].redundant_col ? (
+                                              <>
+                                                <div className="text-sm font-semibold text-slate-900">{dropImpact[col].redundant_col}</div>
+                                                <div className="text-xs text-slate-500">{"|corr|="}{Math.abs(dropImpact[col].redundant_corr).toFixed(2)}</div>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div className="text-sm font-semibold text-slate-900">None found</div>
+                                                <div className="text-xs text-slate-500">no redundancy ≥ 0.60</div>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div className={`mt-3 rounded-md border-l-4 p-2.5 text-xs ${dropImpact[col].verdict_tone === "safe" ? "border-emerald-500 bg-emerald-50 text-emerald-900" : dropImpact[col].verdict_tone === "caution" ? "border-amber-500 bg-amber-50 text-amber-900" : dropImpact[col].verdict_tone === "risk" ? "border-red-500 bg-red-50 text-red-900" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                                          <span className="font-medium">Verdict: </span>
+                                          {dropImpact[col].verdict}
+                                        </div>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-500">Treatment</span>
+                                <Select
+                                  value={currentTreatment}
+                                  disabled={isDropped}
+                                  onValueChange={(value) => setTreatmentOverrides((prev) => ({ ...prev, [col]: value }))}
+                                >
+                                  <SelectTrigger className="h-8 w-[180px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80 disabled:border-primary/40 disabled:bg-primary/40 disabled:text-primary-foreground/70">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {TREATMENT_OPTIONS.map((opt) => (
+                                      <SelectItem key={opt} value={opt}>{TREATMENT_LABELS[opt]}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+                                <Checkbox
+                                  checked={isDropped}
+                                  onCheckedChange={(checked) => setDropCols((prev) => ({ ...prev, [col]: Boolean(checked) }))}
+                                />
+                                Drop variable
+                              </label>
+                            </div>
                           </div>
+                        );
+                      })}
+
+                    {recalibratedColumns.length > 0 && (
+                      <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                        <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          <span className="font-medium">Recalibrated</span> — kept despite being flagged for
+                          review, so a real imputation method was found instead of leaving it untreated: {recalibratedColumns.map((r) => `${r.column} → ${TREATMENT_LABELS[r.treatment] ?? r.treatment}`).join(", ")}
                         </div>
-                      );
-                    })}
+                      </div>
+                    )}
 
-                  {recalibratedColumns.length > 0 && (
-                    <div className="flex items-start gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-900">
-                      <Info className="h-4 w-4 mt-0.5 shrink-0" />
-                      <div>
-                        <span className="font-medium">Recalibrated</span> — kept despite being flagged for
-                        review, so a real imputation method was found instead of leaving it untreated:{" "}
-                        {recalibratedColumns.map((r) => `${r.column} → ${TREATMENT_LABELS[r.treatment] ?? r.treatment}`).join(", ")}
+                    {imputationStrategy && (
+                      <div className="rounded-xl border border-slate-200 border-l-4 border-l-blue-600 bg-white p-3">
+                        <div className="text-sm font-medium text-slate-900">
+                          Statistical imputation method: <span className="font-mono">{imputationStrategy.method?.toUpperCase()}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600">{imputationStrategy.reason}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-xs text-slate-500">Override</span>
+                          <Select
+                            value={strategyOverride ?? "auto"}
+                            onValueChange={(value) => setStrategyOverride(value === "auto" ? null : value)}
+                          >
+                            <SelectTrigger className="h-8 w-[160px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">Auto (recommended)</SelectItem>
+                              <SelectItem value="mice">MICE</SelectItem>
+                              <SelectItem value="knn">KNN</SelectItem>
+                              <SelectItem value="median">Median</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                    </div>
-                  )}
-
-                  {imputationStrategy && (
-                    <div className="rounded-lg border border-border border-l-4 border-l-primary bg-background p-3">
-                      <div className="text-sm font-medium">
-                        Statistical imputation method: <span className="font-mono">{imputationStrategy.method?.toUpperCase()}</span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{imputationStrategy.reason}</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Override</span>
-                        <Select
-                          value={strategyOverride ?? "auto"}
-                          onValueChange={(value) => setStrategyOverride(value === "auto" ? null : value)}
-                        >
-                          <SelectTrigger className="h-8 w-[160px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="auto">Auto (recommended)</SelectItem>
-                            <SelectItem value="mice">MICE</SelectItem>
-                            <SelectItem value="knn">KNN</SelectItem>
-                            <SelectItem value="median">Median</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* ── Skew-Driven Transforms ─────────────────────────────────── */}
-          <Card className="shadow-elegant">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <BarChartIcon className="h-4 w-4" />
-                Skew-Driven Transforms
-              </CardTitle>
-              <CardDescription>
-                {transformDecisions.length > 0
-                  ? `${transformDecisions.length} of ${Object.keys(transformRecommendations).length} numeric column(s) are skewed enough to matter — everything else is left alone.`
-                  : "No numeric columns are skewed enough to need a transform."}
-              </CardDescription>
-            </CardHeader>
-            {transformDecisions.length > 0 && (
-              <CardContent className="space-y-3">
-                {transformDecisions.map(([col, rec]) => {
-                  const badge = severityBadge(rec.skew);
-                  const current = transformChoices[col] ?? "none";
-                  return (
-                    <div key={col} className="rounded-lg border border-border bg-background p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-sm">{col}</span>
-                        <span className={`rounded-full border px-2 py-0.5 text-xs ${badge.className}`}>
-                          {badge.label} · {rec.skew.toFixed(2)}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          recommended: <span className="font-medium text-foreground">{TRANSFORM_LABELS[rec.transform]}</span>
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-xs text-muted-foreground">{rec.reason}</p>
-                      <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Apply</span>
-                        <Select
-                          value={current}
-                          onValueChange={(value) => setTransformChoices((prev) => ({ ...prev, [col]: value }))}
-                        >
-                          <SelectTrigger className="h-8 w-[160px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TRANSFORM_OPTIONS.map((opt) => (
-                              <SelectItem key={opt} value={opt}>{TRANSFORM_LABELS[opt]}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  );
-                })}
+                    )}
+                  </>
+                )}
               </CardContent>
-            )}
-          </Card>
+            </Card>
 
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="text-sm font-semibold flex items-center"><TableIcon className="h-4 w-4 mr-2" />Preprocessing Strategy Summary</div>
+            <Card className="shadow-sm border-slate-200 bg-white">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm text-slate-900">
+                  <BarChartIcon className="h-4 w-4 text-violet-600" />
+                  Skew-Driven Transforms
+                </CardTitle>
+                <CardDescription>
+                  {transformDecisions.length > 0
+                    ? `${transformDecisions.length} of ${Object.keys(transformRecommendations).length} numeric column(s) are skewed enough to matter — everything else is left alone.`
+                    : "No numeric columns are skewed enough to need a transform."}
+                </CardDescription>
+              </CardHeader>
+              {transformDecisions.length > 0 && (
+                <CardContent className="space-y-3">
+                  {transformDecisions.map(([col, rec]) => {
+                    const badge = severityBadge(rec.skew);
+                    const current = transformChoices[col] ?? "none";
+                    return (
+                      <div key={col} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-sm text-slate-900">{col}</span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[11px] ${badge.className}`}>
+                            {badge.label} · {rec.skew.toFixed(2)}
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            recommended: <span className="font-medium text-slate-800">{TRANSFORM_LABELS[rec.transform]}</span>
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <MiniBar fraction={Math.min(1, Math.abs(rec.skew) / 3)} colorClass={skewBarColor(rec.skew)} />
+                        </div>
+                        <p className="mt-1.5 text-xs text-slate-600">{rec.reason}</p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <span className="text-xs text-slate-500">Apply</span>
+                          <Select
+                            value={current}
+                            onValueChange={(value) => setTransformChoices((prev) => ({ ...prev, [col]: value }))}
+                          >
+                            <SelectTrigger className="h-8 w-[160px] border-primary bg-primary text-xs text-primary-foreground hover:bg-primary/90 focus:ring-primary data-[placeholder]:text-primary-foreground [&>span]:text-primary-foreground [&_svg]:text-primary-foreground [&_svg]:opacity-80">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TRANSFORM_OPTIONS.map((opt) => (
+                                <SelectItem key={opt} value={opt}>{TRANSFORM_LABELS[opt]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              )}
+            </Card>
+          </div>
+
+          <TransformationsAppliedCard rows={strategySummary} />
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 text-base font-semibold text-slate-900">
+              <TableIcon className="h-4 w-4 text-slate-600" />
+              Preprocessing Strategy Summary
+            </div>
             <div className="mt-4 overflow-x-auto">
               {strategySummary.length > 0 ? (
                 <table className="min-w-full border-collapse text-sm">
                   <thead>
                     <tr>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">#</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Column</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Type</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Scaler</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Imputer</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Encoding</th>
-                      <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">Transform</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">#</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Column</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Type</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Scaler</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Imputer</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Encoding</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">Transform</th>
                     </tr>
                   </thead>
                   <tbody>
                     {strategySummary.map((row: any, index: number) => (
-                      <tr key={index} className={index % 2 === 0 ? "bg-background" : "bg-background/50"}>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{index + 1}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.feature}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.type}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.scaler}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.imputer}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.encoding}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.transform ?? "-"}</td>
+                      <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{index + 1}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-700">{row.feature}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{row.type}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{row.scaler}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{row.imputer}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{row.encoding}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-600">{row.transform ?? "-"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               ) : (
-                <div className="p-6 text-center text-sm text-muted-foreground">No preprocessing strategy summary available.</div>
+                <div className="p-6 text-center text-sm text-slate-500">No preprocessing strategy summary available.</div>
               )}
             </div>
           </div>
 
-          {/* ── Downloads ───────────────────────────────────────────────── */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold">Original Dataset</div>
-                <p className="text-xs text-muted-foreground">The dataset exactly as uploaded, before any processing.</p>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Original Dataset</div>
+                  <p className="text-xs text-slate-500">The dataset exactly as uploaded, before any processing.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => downloadCsv(preprocess?.original_dataset_csv, "original_dataset.csv")}
+                  className="gap-2 self-start sm:self-auto"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                onClick={() => downloadCsv(preprocess?.original_dataset_csv, "original_dataset.csv")}
-                className="gap-2 self-start sm:self-auto"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </Button>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold">Transformed Dataset</div>
-                <p className="text-xs text-muted-foreground">Training split after imputation, scaling and encoding.</p>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Transformed Dataset</div>
+                  <p className="text-xs text-slate-500">Training split after imputation, scaling and encoding.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => downloadCsv(preprocess?.processed_dataset_csv, "transformed_dataset.csv")}
+                  className="gap-2 self-start sm:self-auto"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                onClick={() => downloadCsv(preprocess?.processed_dataset_csv, "transformed_dataset.csv")}
-                className="gap-2 self-start sm:self-auto"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </Button>
             </div>
           </div>
 
           <Separator />
 
-          <div className="flex gap-3 pt-4">
+          <div className="flex gap-3 pt-2">
             <Button variant="outline" onClick={onBackToProfiling} className="gap-2">
               <ArrowLeft className="h-4 w-4" />
               Back to Profiling
@@ -1486,7 +2011,7 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
           </div>
         </>
       ) : !loading && !error ? (
-        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 shadow-sm">
           Preparing preprocessing results...
         </div>
       ) : null}
@@ -1752,212 +2277,238 @@ function FeaturesSection() {
       (preprocessingResult?.datetime_feature_count ?? preprocessingResult?.summary_metrics?.datetime_columns ?? 0),
   };
 
+  // ── Feature Overview table — built entirely from real, already-fetched
+  //    values: original-column universe from feature_engineering_plan.col_types
+  //    (a type→column-list map, not per-column — see resolveFeatureType),
+  //    IV/Gini from the same plan, missing% joined from the preprocessing
+  //    result (only columns with any missing values are present there, so a
+  //    missing entry means 0%), and status derived from dropped_features /
+  //    the same cascade-rescue removal proposal already driving the
+  //    interactive table below. Target and id-typed columns are excluded —
+  //    they aren't candidate features. ──
+  const colTypes = engineeringResult?.col_types;
+  const ivScores: Record<string, number> = plan.iv_scores ?? {};
+  const giniScores: Record<string, number> = engineeringResult?.gini_scores ?? {};
+  const miScores: Record<string, number> = engineeringResult?.feature_importance_summary?.mi_scores ?? {};
+  const missingTreatmentMap: Record<string, TreatmentInfo> = preprocessingResult?.missing_treatment_proposal ?? {};
+  const droppedFeatureSet = new Set(Array.isArray(engineeringResult?.dropped_features) ? engineeringResult.dropped_features : []);
+  const reviewFeatureSet = new Set(removalProposal.rows.map((r) => r.feature).filter((f) => !droppedFeatureSet.has(f)));
+
+  const featureUniverse = colTypes
+    ? Array.from(new Set(Object.entries(colTypes).filter(([type]) => type !== "id").flatMap(([, cols]) => (Array.isArray(cols) ? cols : []))))
+    : [];
+
+  const featureOverviewRows: FeatureOverviewRow[] = featureUniverse
+    .filter((f) => f !== engineeringResult?.target_col)
+    .map((feature) => ({
+      feature,
+      type: resolveFeatureType(colTypes, feature),
+      iv: ivScores[feature] ?? null,
+      gini: giniScores[feature] ?? null,
+      missingPct: missingTreatmentMap[feature]?.evidence?.missing_pct ?? (preprocessingResult ? 0 : null),
+      status: (droppedFeatureSet.has(feature) ? "removed" : reviewFeatureSet.has(feature) ? "review" : "selected") as FeatureOverviewRow["status"],
+    }))
+    .sort((a, b) => (b.iv ?? -1) - (a.iv ?? -1));
+
+  // Rank by whichever real per-feature score the backend actually populated
+  // for this task/dataset — never claim a metric (e.g. "XGBoost importance")
+  // Aegis doesn't compute at this stage.
+  const importanceSource: [string, Record<string, number>][] = [
+    ["Univariate Gini coefficient (numeric features, training split)", giniScores],
+    ["Information Value — IV (numeric & categorical candidates)", ivScores],
+    ["Mutual Information score (numeric features)", miScores],
+  ];
+  const [importanceLabel, importanceMap] = importanceSource.find(([, scores]) => Object.keys(scores).length > 0) ?? [
+    "No importance scores available",
+    {} as Record<string, number>,
+  ];
+  const importanceItems = Object.entries(importanceMap)
+    .map(([name, score]) => ({ name, score: Number(score) }))
+    .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+    .slice(0, 10);
+
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="text-sm font-semibold">Step 4 — Feature Engineering</div>
-        <p className="mt-2 text-sm text-muted-foreground">Engineered features, multicollinearity diagnostics, and importance preview.</p>
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-800 p-6 text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-indigo-200">Step 4</div>
+            <h3 className="mt-2 text-2xl font-semibold">Feature Engineering</h3>
+            <p className="mt-2 text-sm text-slate-200">Engineered features, multicollinearity diagnostics, and importance preview.</p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+            onClick={downloadEngineeredDataset}
+          >
+            <Download className="h-4 w-4" />
+            Download engineered dataset
+          </button>
+        </div>
       </div>
 
       {preprocessingResult && (
-        <div className={`grid grid-cols-1 gap-4 md:grid-cols-4${preprocessSummary.other_feature_count > 0 ? " xl:grid-cols-5" : ""}`}>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center text-sm text-muted-foreground"><TableIcon className="h-4 w-4 mr-2" />Feature Count After Cleanup</div>
-            <div className="mt-3 text-3xl font-semibold tabular-nums">{preprocessSummary.feature_count ?? "—"}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Columns remaining after removing sparse/ID columns</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center text-sm text-muted-foreground"><Trash2 className="h-4 w-4 mr-2" />Duplicate Rows Removed</div>
-            <div className="mt-3 text-3xl font-semibold tabular-nums">{preprocessSummary.duplicates_removed ?? 0}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Exact-copy rows dropped before splitting</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center text-sm text-muted-foreground"><Hash className="h-4 w-4 mr-2" />Numeric Columns</div>
-            <div className="mt-3 text-3xl font-semibold tabular-nums">{preprocessSummary.numeric_feature_count ?? "—"}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Continuous fields available for modeling</div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center text-sm text-muted-foreground"><Tag className="h-4 w-4 mr-2" />Categorical Columns</div>
-            <div className="mt-3 text-3xl font-semibold tabular-nums">{preprocessSummary.categorical_feature_count ?? "—"}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Non-numeric fields requiring encoding</div>
-          </div>
-          {preprocessSummary.other_feature_count > 0 && (
-            <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-              <div className="flex items-center text-sm text-muted-foreground"><TableIcon className="h-4 w-4 mr-2" />Other Columns</div>
-              <div className="mt-3 text-3xl font-semibold tabular-nums">{preprocessSummary.other_feature_count}</div>
-              <div className="mt-1 text-xs text-muted-foreground">Boolean/datetime fields, engineered separately</div>
-            </div>
-          )}
-        </div>
+        <KpiStrip
+          tiles={[
+            { icon: TableIcon, label: "Feature Count After Cleanup", value: preprocessSummary.feature_count != null ? String(preprocessSummary.feature_count) : "—", sub: "After removing sparse/ID columns", tone: "primary" },
+            { icon: Trash2, label: "Duplicate Rows Removed", value: String(preprocessSummary.duplicates_removed ?? 0), sub: "Exact-copy rows dropped pre-split", tone: "rose" },
+            { icon: Hash, label: "Numeric Columns", value: preprocessSummary.numeric_feature_count != null ? String(preprocessSummary.numeric_feature_count) : "—", sub: "Continuous fields for modeling", tone: "emerald" },
+            { icon: Tag, label: "Categorical Columns", value: preprocessSummary.categorical_feature_count != null ? String(preprocessSummary.categorical_feature_count) : "—", sub: "Non-numeric, need encoding", tone: "violet" },
+            ...(preprocessSummary.other_feature_count > 0
+              ? [{ icon: TableIcon, label: "Other Columns", value: String(preprocessSummary.other_feature_count), sub: "Boolean/datetime, engineered separately", tone: "primary" as const }]
+              : []),
+          ]}
+        />
       )}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        {originalFeatures !== null && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Original features</div>
-            <div className="mt-2 text-2xl font-semibold tabular-nums">{originalFeatures}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Columns before feature engineering</div>
-          </div>
-        )}
-        {finalFeatures !== null && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Final features</div>
-            <div className="mt-2 text-2xl font-semibold tabular-nums">{finalFeatures}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Columns after feature engineering</div>
-          </div>
-        )}
-        {addedFeatures.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Features added</div>
-            <div className="mt-2 text-2xl font-semibold tabular-nums">{addedFeatures.length}</div>
-            <div className="mt-1 text-xs text-muted-foreground">New engineered columns created</div>
-          </div>
-        )}
-        {removedFeatures.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground">Features removed</div>
-            <div className="mt-2 text-2xl font-semibold tabular-nums">{removedFeatures.length}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Columns dropped during feature engineering</div>
-          </div>
-        )}
-      </section>
+      {(originalFeatures !== null || finalFeatures !== null || addedFeatures.length > 0 || removedFeatures.length > 0) && (
+        <KpiStrip
+          tiles={[
+            ...(originalFeatures !== null ? [{ icon: Layers, label: "Original Features", value: String(originalFeatures), sub: "Before feature engineering", tone: "primary" as const }] : []),
+            ...(finalFeatures !== null ? [{ icon: Layers, label: "Final Features", value: String(finalFeatures), sub: "After feature engineering", tone: "emerald" as const }] : []),
+            ...(addedFeatures.length > 0 ? [{ icon: TrendingUp, label: "Features Added", value: String(addedFeatures.length), sub: "New engineered columns", tone: "violet" as const }] : []),
+            ...(removedFeatures.length > 0 ? [{ icon: Trash2, label: "Features Removed", value: String(removedFeatures.length), sub: "Dropped during engineering", tone: "rose" as const }] : []),
+          ]}
+        />
+      )}
 
-      <section className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium transition hover:border-primary hover:bg-primary-soft"
-          onClick={downloadEngineeredDataset}
-        >
-          <Download className="h-4 w-4" />
-          Download engineered dataset
-        </button>
-      </section>
+      <PipelineFlow
+        stages={[
+          { label: "Raw Features", value: profile?.shape?.[1] ?? null, sub: "input" },
+          { label: "Cleaned", value: preprocessSummary.feature_count ?? null, sub: "deduplicated" },
+          { label: "Missing-Treated", value: preprocessingResult ? Object.keys(preprocessingResult.missing_treatment_proposal ?? {}).length : null, sub: "columns treated" },
+          { label: "Transformed", value: preprocessingResult ? Object.values(preprocessingResult.transform_recommendations ?? {}).filter((r: any) => r?.transform && r.transform !== "none").length : null, sub: "skew-corrected" },
+          { label: "Model-Ready", value: finalFeatures, sub: "final features" },
+        ]}
+      />
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <h2 className="text-base font-semibold">🗑️ Feature Removal Proposal</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Features proposed for removal by automated analysis. Untick any row to retain that feature. Click Apply
-          to re-run feature engineering with your confirmed choices.
-        </p>
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">Feature Removal Proposal</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Features proposed for removal by automated analysis. Untick any row to retain that feature. Click Apply
+            to re-run feature engineering with your confirmed choices.
+          </p>
 
-        {removalProposal.rescueSet.size > 0 && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-            <RefreshCw className="mt-0.5 h-4 w-4 flex-shrink-0" />
-            <div>
-              <strong>Cascade rescue</strong> — {Array.from(removalProposal.rescueSet).map((f) => `\`${f}\``).join(", ")}{" "}
-              pre-retained: both members of a correlated pair were proposed for removal; the higher-IV member was
-              kept so the information family doesn't vanish entirely.
+          {removalProposal.rescueSet.size > 0 && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <RefreshCw className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <div>
+                <strong>Cascade rescue</strong> — {Array.from(removalProposal.rescueSet).map((f) => `\`${f}\``).join(", ")} pre-retained: both members of a correlated pair were proposed for removal; the higher-IV member was kept so the information family doesn't vanish entirely.
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {removalProposal.rows.length > 0 ? (
-          <>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="border-b border-border px-3 py-2">#</th>
-                    <th className="border-b border-border px-3 py-2">Feature</th>
-                    <th className="border-b border-border px-3 py-2">IV</th>
-                    <th className="border-b border-border px-3 py-2">Reason</th>
-                    <th className="border-b border-border px-3 py-2">Remove?</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {removalProposal.rows.map((row, rowIndex) => (
-                    <tr key={row.feature} className="odd:bg-background">
-                      <td className="border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">{rowIndex + 1}</td>
-                      <td className="border-b border-border px-3 py-2 font-mono text-xs">{row.feature}</td>
-                      <td className="border-b border-border px-3 py-2 text-xs">{row.iv !== null ? row.iv.toFixed(4) : "—"}</td>
-                      <td className="border-b border-border px-3 py-2 text-xs text-muted-foreground">{row.reason}</td>
-                      <td className="border-b border-border px-3 py-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={!!removeChecked[row.feature]}
-                          onChange={(e) =>
-                            setRemoveChecked((prev) => ({ ...prev, [row.feature]: e.target.checked }))
-                          }
-                        />
-                      </td>
+          {removalProposal.rows.length > 0 ? (
+            <>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+                      <th className="border-b border-slate-200 px-3 py-2">#</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Feature</th>
+                      <th className="border-b border-slate-200 px-3 py-2">IV</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Reason</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Remove?</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <button
-              type="button"
-              disabled={applyingRemoval || loading}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={applyRemovalChoices}
-            >
-              {applyingRemoval ? <Loader className="h-4 w-4 animate-spin" /> : null}
-              Apply removal choices
-            </button>
-          </>
-        ) : (
-          <p className="mt-4 text-sm text-muted-foreground">No features proposed for removal on this dataset.</p>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <h2 className="text-base font-semibold">🔗 Interaction Terms Generated</h2>
-        {interactionFeatures.length > 0 ? (
-          <>
-            <p className="mt-1 text-xs text-muted-foreground">
-              IV and Gini are each interaction's own predictive power — the metrics that let it pass evaluation
-              (min IV, redundancy filtering) — not a lift over the source features alone.
-            </p>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full border-collapse text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="border-b border-border px-3 py-2">#</th>
-                    <th className="border-b border-border px-3 py-2">Feature A</th>
-                    <th className="border-b border-border px-3 py-2">Feature B</th>
-                    <th className="border-b border-border px-3 py-2">Type</th>
-                    <th className="border-b border-border px-3 py-2">IV</th>
-                    <th className="border-b border-border px-3 py-2">Gini</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...interactionFeatures]
-                    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-                    .map((f, idx) => (
-                      <tr key={f.name ?? idx} className="odd:bg-background">
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">{idx + 1}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{f.feature_a}</td>
-                        <td className="border-b border-border px-3 py-2 font-mono text-xs">{f.feature_b}</td>
-                        <td className="border-b border-border px-3 py-2 text-xs">{f.interaction_type ?? f.type ?? "—"}</td>
-                        <td className="border-b border-border px-3 py-2 text-xs">{f.score !== undefined ? f.score.toFixed(4) : "—"}</td>
-                        <td className="border-b border-border px-3 py-2 text-xs">{f.gini !== undefined && f.gini !== null ? f.gini.toFixed(4) : "—"}</td>
+                  </thead>
+                  <tbody>
+                    {removalProposal.rows.map((row, rowIndex) => (
+                      <tr key={row.feature} className={rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-500">{rowIndex + 1}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-800">{row.feature}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 text-xs text-slate-700">{row.iv !== null ? row.iv.toFixed(4) : "—"}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 text-xs text-slate-600">{row.reason}</td>
+                        <td className="border-b border-slate-200 px-3 py-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={!!removeChecked[row.feature]}
+                            onChange={(e) => setRemoveChecked((prev) => ({ ...prev, [row.feature]: e.target.checked }))}
+                          />
+                        </td>
                       </tr>
                     ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <p className="mt-2 text-sm text-muted-foreground">No interaction terms passed evaluation for this dataset.</p>
-        )}
-      </section>
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                disabled={applyingRemoval || loading}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={applyRemovalChoices}
+              >
+                {applyingRemoval ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                Apply removal choices
+              </button>
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">No features proposed for removal on this dataset.</p>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">Generated interactions</h2>
+          {interactionFeatures.length > 0 ? (
+            <>
+              <p className="mt-1 text-xs text-slate-500">
+                IV and Gini are each interaction's own predictive power — the metrics that let it pass evaluation
+                (min IV, redundancy filtering) — not a lift over the source features alone.
+              </p>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+                      <th className="border-b border-slate-200 px-3 py-2">#</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Feature A</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Feature B</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Type</th>
+                      <th className="border-b border-slate-200 px-3 py-2">IV</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Gini</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...interactionFeatures]
+                      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+                      .map((f, idx) => (
+                        <tr key={f.name ?? idx} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                          <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-500">{idx + 1}</td>
+                          <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-800">{f.feature_a}</td>
+                          <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-800">{f.feature_b}</td>
+                          <td className="border-b border-slate-200 px-3 py-2 text-xs text-slate-700">{f.interaction_type ?? f.type ?? "—"}</td>
+                          <td className="border-b border-slate-200 px-3 py-2 text-xs text-slate-700">{f.score !== undefined ? f.score.toFixed(4) : "—"}</td>
+                          <td className="border-b border-slate-200 px-3 py-2 text-xs text-slate-700">{f.gini !== undefined && f.gini !== null ? f.gini.toFixed(4) : "—"}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">No interaction terms passed evaluation for this dataset.</p>
+          )}
+        </section>
+      </div>
+
+      <FeatureOverviewTable rows={featureOverviewRows} />
+
+      <FeatureImportanceBars items={importanceItems} metricLabel={importanceLabel} />
 
       {regulatoryAlerts.length > 0 && (
-        <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-          <h2 className="text-base font-semibold">Regulatory insights</h2>
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-amber-900">Regulatory insights</h2>
           <div className="mt-4 space-y-3">
             {regulatoryAlerts.map((alert: any, idx: number) => (
-              <div key={idx} className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <div className="text-sm font-semibold">{alert.rule_id || alert.id || alert.code || alert.rule || `Alert ${idx + 1}`}</div>
-                <div className="mt-1 text-sm text-muted-foreground">{alert.flag || alert.message || alert.detail || alert.description || JSON.stringify(alert)}</div>
+              <div key={idx} className="rounded-xl border border-amber-200 bg-white p-4">
+                <div className="text-sm font-semibold text-amber-900">{alert.rule_id || alert.id || alert.code || alert.rule || `Alert ${idx + 1}`}</div>
+                <div className="mt-1 text-sm text-slate-600">{alert.flag || alert.message || alert.detail || alert.description || JSON.stringify(alert)}</div>
                 {alert.observed_value && (
-                  <div className="mt-2 text-xs font-mono text-muted-foreground">Observed: {Array.isArray(alert.observed_value) ? alert.observed_value.join(", ") : String(alert.observed_value)}</div>
+                  <div className="mt-2 text-xs font-mono text-slate-500">Observed: {Array.isArray(alert.observed_value) ? alert.observed_value.join(", ") : String(alert.observed_value)}</div>
                 )}
                 {alert.suggestion && (
-                  <div className="mt-2 text-[11px] text-muted-foreground">Recommendation: {alert.suggestion}</div>
+                  <div className="mt-2 text-[11px] text-slate-600">Recommendation: {alert.suggestion}</div>
                 )}
                 {alert.source && (
-                  <div className="mt-1 text-[11px] text-muted-foreground">Reference: {alert.source} — {alert.principle || alert.section || ''}</div>
+                  <div className="mt-1 text-[11px] text-slate-500">Reference: {alert.source} — {alert.principle || alert.section || ""}</div>
                 )}
               </div>
             ))}
@@ -1966,29 +2517,29 @@ function FeaturesSection() {
       )}
 
       {(engineeringResult.final_engineered_dataset_preview && Array.isArray(engineeringResult.final_engineered_dataset_preview) && engineeringResult.final_engineered_dataset_preview.length > 0) || (engineeringResult.x_engineered_preview && Array.isArray(engineeringResult.x_engineered_preview) && engineeringResult.x_engineered_preview.length > 0) ? (
-        <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold">Engineered feature matrix preview</h2>
-              <p className="text-xs text-muted-foreground">A sample of the transformed dataset after feature engineering.</p>
+              <h2 className="text-base font-semibold text-slate-900">Engineered feature matrix preview</h2>
+              <p className="text-xs text-slate-500">A sample of the transformed dataset after feature engineering.</p>
             </div>
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr>
-                  <th className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">#</th>
+                  <th className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">#</th>
                   {Object.keys((engineeringResult.final_engineered_dataset_preview && Array.isArray(engineeringResult.final_engineered_dataset_preview) && engineeringResult.final_engineered_dataset_preview.length > 0 ? engineeringResult.final_engineered_dataset_preview : engineeringResult.x_engineered_preview ?? [])[0] ?? {}).map((key: string) => (
-                    <th key={key} className="border-b border-border px-3 py-2 text-left font-medium text-muted-foreground">{key}</th>
+                    <th key={key} className="border-b border-slate-200 px-3 py-2 text-left font-medium text-slate-500">{key}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {(engineeringResult.final_engineered_dataset_preview && Array.isArray(engineeringResult.final_engineered_dataset_preview) && engineeringResult.final_engineered_dataset_preview.length > 0 ? engineeringResult.final_engineered_dataset_preview : engineeringResult.x_engineered_preview ?? []).map((row: any, rowIndex: number) => (
-                  <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-background" : ""}>
-                    <td className="border-b border-border px-3 py-2 font-mono text-xs text-muted-foreground">{rowIndex + 1}</td>
+                  <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50/50"}>
+                    <td className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-500">{rowIndex + 1}</td>
                     {Object.values(row).map((cell: any, cellIndex: number) => (
-                      <td key={cellIndex} className="border-b border-border px-3 py-2 font-mono text-xs">{String(cell)}</td>
+                      <td key={cellIndex} className="border-b border-slate-200 px-3 py-2 font-mono text-xs text-slate-700">{String(cell)}</td>
                     ))}
                   </tr>
                 ))}
@@ -1999,16 +2550,13 @@ function FeaturesSection() {
       ) : null}
 
       <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium transition hover:border-primary hover:bg-primary-soft"
-          onClick={downloadDecisionLog}
-        >
+        <Button variant="outline" onClick={downloadDecisionLog} className="gap-2">
           <Download className="h-4 w-4" />
           Download feature decision log
-        </button>
-        <button
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+        </Button>
+        <Button
           disabled={!canProceed}
+          className="gap-2"
           onClick={async () => {
             try {
               await navigate({ to: "/model-training-evaluation" });
@@ -2019,7 +2567,7 @@ function FeaturesSection() {
         >
           Proceed to Model Training
           <ArrowRight className="h-4 w-4" />
-        </button>
+        </Button>
       </section>
     </div>
   );

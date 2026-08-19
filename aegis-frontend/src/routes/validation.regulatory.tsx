@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { PageHeader } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Card as UiCard } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowRight, Loader2, Search } from "lucide-react";
 import { ApiError, formUpload } from "@/lib/api";

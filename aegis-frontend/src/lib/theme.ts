@@ -14,9 +14,9 @@ export function getStoredTheme(): Theme | null {
 export function getPreferredTheme(): Theme {
   const stored = getStoredTheme();
   if (stored) return stored;
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-    return "dark";
-  }
+  // Default to light when no explicit user preference is stored. We avoid
+  // inferring from system dark-mode here so the design tokens' light
+  // palette (Figma reference) is visible by default in the POC.
   return "light";
 }
 

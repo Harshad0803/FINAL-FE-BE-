@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { api, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { ArrowRight, FileCheck, FileText, Upload, CheckCircle2, Circle } from "lucide-react";
@@ -519,7 +521,7 @@ function Intake() {
         description={intake.description}
       />
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+      <Card className="p-6 shadow-elegant">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm font-semibold text-foreground">Demo mode</div>
@@ -546,16 +548,16 @@ function Intake() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          <Badge variant="outline" className="border-border bg-background px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             {demoMode ?? "No demo loaded"}
-          </div>
+          </Badge>
           {demoLoading ? <div className="text-xs text-muted-foreground">Loading demo...</div> : null}
           {demoError ? <div className="text-xs text-amber-300">{demoError}</div> : null}
         </div>
-      </section>
+      </Card>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.55fr_0.95fr]">
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+        <Card className="p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">{intake.modelMetadata.title}</h3>
@@ -632,7 +634,7 @@ function Intake() {
               </span>
             </div>
           ) : null}
-        </div>
+        </Card>
 
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-5 shadow-elegant">

@@ -1,11 +1,26 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
-  ArrowRight, CheckCircle2, Database, Download, FileSpreadsheet, Globe, Info, Landmark, Link2, Loader, RefreshCw, ShieldCheck, Table2, TrendingUp, Upload,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Download,
+  FileSpreadsheet,
+  Globe,
+  Info,
+  Landmark,
+  Link2,
+  Loader,
+  RefreshCw,
+  Table2,
+  TrendingUp,
+  Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/data-upload")({
   head: () => ({ meta: [{ title: "Data Upload — Aegis Credit" }] }),
@@ -41,6 +56,10 @@ type MacroDateCandidate = {
   column: string;
   is_preferred: boolean;
 };
+
+type SourceStatus = "connected" | "pending" | "warning";
+
+type FlowNode = { key: string; label: string; sub: string; state: SourceStatus };
 
 async function readCsvHeader(file: File): Promise<string[]> {
   const text = await file.slice(0, 8192).text();
@@ -365,377 +384,963 @@ function DataUpload() {
 
   const integrationReport = report?.integration_report;
 
+  // ── Presentation-only derived values (all from state already above — no new fetches) ──
+  const sourcesConnectedCount = [Boolean(customerFile), Boolean(dbFile), macroColumns.length > 0].filter(Boolean).length;
+
+  const integrationSourceByName = (name: string): { name: string; rows: number; columns: number } | null =>
+    integrationReport?.sources?.find((s: any) => s.name === name) ?? null;
+  const customerSourceInfo = integrationSourceByName("customer");
+
+  const loanTableInfo = dbTables?.find((t) => t.table === loanTable) ?? null;
+  const collateralTableInfo = dbTables?.find((t) => t.table === collateralTable) ?? null;
+  const loanSourceInfo = loanTable ? integrationSourceByName(loanTable) : null;
+  const collateralSourceInfo = collateralTable ? integrationSourceByName(collateralTable) : null;
+
+  const customerLoanCandidate = loanTable ? bestCandidate(candidates, "customer", loanTable) : null;
+  const loanCollateralCandidate = loanTable && collateralTable ? bestCandidate(candidates, loanTable, collateralTable) : null;
+
+  const activeJoinConfidences = [
+    loanTable && customerLoanJoin ? customerLoanCandidate?.confidence : null,
+    loanTable && collateralTable && loanCollateralJoin ? loanCollateralCandidate?.confidence : null,
+  ].filter((c): c is number => typeof c === "number");
+  const joinHealthPct = activeJoinConfidences.length
+    ? Math.round((activeJoinConfidences.reduce((a, b) => a + b, 0) / activeJoinConfidences.length) * 100)
+    : null;
+
+  const flowNodes: FlowNode[] = [
+    {
+      key: "customer",
+      label: "Customer CSV",
+      sub: customerFile
+        ? `${customerColumns.length} columns${customerSourceInfo ? ` · ${customerSourceInfo.rows.toLocaleString()} rows` : ""}`
+        : "Not uploaded",
+      state: customerFile ? "connected" : "pending",
+    },
+  ];
+  if (loanTable) {
+    flowNodes.push({
+      key: "loan",
+      label: loanTable,
+      sub: loanSourceInfo
+        ? `${loanSourceInfo.rows.toLocaleString()} rows · ${loanSourceInfo.columns} cols`
+        : loanTableInfo
+        ? `${loanTableInfo.row_count.toLocaleString()} rows · ${loanColumns.length} cols`
+        : "Awaiting database",
+      state: dbFile && loanTable ? "connected" : "pending",
+    });
+  }
+  if (collateralTable) {
+    flowNodes.push({
+      key: "collateral",
+      label: collateralTable,
+      sub: collateralSourceInfo
+        ? `${collateralSourceInfo.rows.toLocaleString()} rows · ${collateralSourceInfo.columns} cols`
+        : collateralTableInfo
+        ? `${collateralTableInfo.row_count.toLocaleString()} rows · ${collateralColumns.length} cols`
+        : "Awaiting database",
+      state: dbFile && collateralTable ? "connected" : "pending",
+    });
+  }
+  if (macroColumns.length > 0) {
+    flowNodes.push({
+      key: "macro",
+      label: "Macro Data",
+      sub: macroDateColUsed ? `Aligned on ${macroDateColUsed}` : `${macroColumns.length} series attached`,
+      state: "connected",
+    });
+  }
+  flowNodes.push({
+    key: "integrated",
+    label: "Integrated Dataset",
+    sub: integrationReport
+      ? `${integrationReport.rows_after.toLocaleString()} rows · ${integrationReport.columns_after} cols`
+      : integrating
+      ? "Integrating…"
+      : "Not yet integrated",
+    state: integrationReport ? (integrationReport.warnings?.length ? "warning" : "connected") : "pending",
+  });
+
+  const pipelineSteps: { label: string; sub: string; status: "done" | "active" | "pending" }[] = [
+    { label: "SOURCE", sub: `${sourcesConnectedCount} connected`, status: customerFile ? "done" : "pending" },
+    { label: "CONNECTED", sub: canIntegrate ? "Validated" : "Pending", status: canIntegrate ? "done" : "pending" },
+    {
+      label: "INTEGRATED",
+      sub: integrationReport ? `${integrationReport.rows_after.toLocaleString()} rows` : integrating ? "Running…" : "Pending",
+      status: integrationReport ? "done" : integrating ? "active" : "pending",
+    },
+    { label: "PROFILED", sub: profile ? "Complete" : "Pending", status: profile ? "done" : "pending" },
+    { label: "READY FOR MODELLING", sub: "", status: "pending" },
+  ];
+
+  const isReady = Boolean(hasExplicitDataset && profile);
+
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border-l-4 border-primary bg-card px-4 py-3 shadow-elegant">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background/80">
-            <Link2 className="h-5 w-5 text-muted-foreground" />
+    <div className="space-y-4">
+      {/* Hero */}
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-6 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+            <Link2 className="h-5 w-5 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold tracking-tight">Step 1 — Data Integration</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Combine customer, loan, collateral, and macroeconomic data into a single modelling dataset.
+            <h1 className="text-lg font-semibold leading-tight text-slate-900">Connect a Data Source</h1>
+            <p className="mt-1 max-w-lg text-[13px] text-slate-500">
+              Bring customer, loan, collateral, and macroeconomic data into the modelling workflow. Sources are joined
+              automatically and validated before integration.
             </p>
           </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {/* Customer data */}
-        <div className="rounded-xl border border-border bg-card p-5 shadow-elegant">
-          <input ref={customerInputRef} type="file" accept=".csv" className="hidden" onChange={(e) => void onCustomerFileChosen(e.target.files?.[0] ?? null)} />
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
-            <h4 className="text-sm font-semibold">CSV file</h4>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">The base table every other source joins onto.</p>
-          <button
-            type="button"
-            onClick={() => customerInputRef.current?.click()}
-            className="mt-4 w-full rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-primary-soft"
-          >
-            {customerFile ? customerFile.name : "Upload CSV"}
-          </button>
-          {customerFile ? (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600">
-              <CheckCircle2 className="h-3.5 w-3.5" /> {customerColumns.length} columns detected
-            </div>
-          ) : null}
-        </div>
-
-        {/* SQLite database */}
-        <div className="rounded-xl border border-border bg-card p-5 shadow-elegant">
-          <input ref={dbInputRef} type="file" accept=".db,.sqlite,.sqlite3" className="hidden" onChange={(e) => void onDbFileChosen(e.target.files?.[0] ?? null)} />
-          <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-muted-foreground" />
-            <h4 className="text-sm font-semibold">Database</h4>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">SQLite database — tables are discovered automatically.</p>
-          <button
-            type="button"
-            onClick={() => dbInputRef.current?.click()}
-            className="mt-4 w-full rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-primary-soft"
-          >
-            {dbLoading ? "Reading database…" : dbFile ? dbFile.name : "Upload SQLite database (.db)"}
-          </button>
-          {dbError ? <div className="mt-2 text-xs text-red-500">{dbError}</div> : null}
-
-          {dbTables ? (
-            <div className="mt-4 space-y-3">
-              <label className="block text-xs font-medium text-foreground">
-                Loan table
-                <select value={loanTable} onChange={(e) => onLoanTableChange(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
-                  <option value="">— none —</option>
-                  {dbTables.map((t) => <option key={t.table} value={t.table}>{t.table} ({t.row_count} rows)</option>)}
-                </select>
-              </label>
-              <label className="block text-xs font-medium text-foreground">
-                Collateral table <span className="text-muted-foreground">(optional)</span>
-                <select value={collateralTable} onChange={(e) => onCollateralTableChange(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
-                  <option value="">— none —</option>
-                  {dbTables.map((t) => <option key={t.table} value={t.table}>{t.table} ({t.row_count} rows)</option>)}
-                </select>
-              </label>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Macro data */}
-        <div className="rounded-xl border border-border bg-card p-5 shadow-elegant md:col-span-2">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <h4 className="text-sm font-semibold">Macroeconomic data</h4>
-              <p className="text-xs text-muted-foreground">Fetches macroeconomic indicators (interest rates, unemployment, inflation, etc.) from FRED and matches them to each record by date.</p>
-            </div>
-          </div>
-
-          {customerFile ? (
-            macroColumns.length > 0 ? (
-              <div className="mt-4 space-y-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  Macro data attached: {macroColumns.join(", ")}
-                  {macroDateColUsed && <> (matched to the month of <code className="font-mono">{macroDateColUsed}</code>)</>}
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium transition hover:border-primary hover:bg-primary-soft"
-                  onClick={handleReFetchMacro}
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Re-fetch / change date column
-                </button>
-              </div>
-            ) : (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Loan origination date column
-                  </label>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Auto-detected below — change it if a different date column is the right one to align macro data to.
-                  </p>
-                  {macroCandidatesLoading ? (
-                    <div className="mt-2 flex w-full max-w-md items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-                      <Loader className="h-4 w-4 animate-spin" />
-                      Detecting date column…
-                    </div>
-                  ) : macroCandidates.length > 0 ? (
-                    <select
-                      className="mt-2 w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                      value={selectedMacroDateCol}
-                      onChange={(e) => setSelectedMacroDateCol(e.target.value)}
-                    >
-                      {macroCandidates.map(({ column, is_preferred }) => (
-                        <option key={column} value={column}>
-                          {is_preferred ? `⭐ ${column} (origination/loan date)` : column}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="mt-2 w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-                      No date columns detected
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">
-                    Optionally enrich the dataset with macroeconomic indicators from FRED. The FRED integration is configured server-side.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={!selectedMacroDateCol || macroLoading || macroCandidatesLoading}
-                  className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={fetchMacroFeatures}
-                >
-                  {macroLoading ? <Loader className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-                  Fetch FRED macro features
-                </button>
-                {macroError && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{macroError}</div>
-                )}
-              </div>
-            )
-          ) : null}
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+          <StatusBadge
+            status={sourcesConnectedCount > 0 ? "connected" : "pending"}
+            label={`${sourcesConnectedCount} SOURCE${sourcesConnectedCount === 1 ? "" : "S"} CONNECTED`}
+          />
+          <StatusBadge
+            status={canIntegrate || integrationReport ? "connected" : "pending"}
+            label={integrationReport ? "INTEGRATION COMPLETE" : canIntegrate ? "READY TO INTEGRATE" : "SOURCES INCOMPLETE"}
+          />
         </div>
       </div>
+
+      {/* Source overview */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <SourceOverviewCard
+          icon={<FileSpreadsheet className="h-[18px] w-[18px]" />}
+          name="Customer CSV"
+          subtitle="Primary join table"
+          status={customerFile ? "connected" : "pending"}
+          rows={customerSourceInfo ? customerSourceInfo.rows.toLocaleString() : "—"}
+          cols={customerFile ? String(customerColumns.length) : "—"}
+          detail={customerFile?.name ?? "Not connected"}
+        />
+        <SourceOverviewCard
+          icon={<Database className="h-[18px] w-[18px]" />}
+          name="SQLite Database"
+          subtitle={dbTables ? `${dbTables.length} table${dbTables.length === 1 ? "" : "s"} discovered` : "Loan & collateral tables"}
+          status={dbFile ? "connected" : "pending"}
+          rows={loanTableInfo ? loanTableInfo.row_count.toLocaleString() : "—"}
+          cols={loanTable || collateralTable ? String(loanColumns.length + collateralColumns.length) : "—"}
+          detail={dbFile?.name ?? "Not connected"}
+        />
+        <SourceOverviewCard
+          icon={<TrendingUp className="h-[18px] w-[18px]" />}
+          name="Macroeconomic Data"
+          subtitle="FRED macro indicators"
+          status={macroColumns.length > 0 ? "connected" : "pending"}
+          rows="—"
+          cols={macroColumns.length > 0 ? String(macroColumns.length) : "—"}
+          detail={macroDateColUsed ? `Aligned on ${macroDateColUsed}` : customerFile ? "Not fetched yet" : "Upload customer data first"}
+        />
+      </div>
+
+      {/* Upload / connect workspace */}
+      <SourceWorkspace
+        customerInputRef={customerInputRef}
+        dbInputRef={dbInputRef}
+        customerFile={customerFile}
+        customerColumns={customerColumns}
+        onCustomerFileChosen={onCustomerFileChosen}
+        dbFile={dbFile}
+        dbTables={dbTables}
+        dbLoading={dbLoading}
+        dbError={dbError}
+        onDbFileChosen={onDbFileChosen}
+        loanTable={loanTable}
+        collateralTable={collateralTable}
+        onLoanTableChange={onLoanTableChange}
+        onCollateralTableChange={onCollateralTableChange}
+        macroCandidates={macroCandidates}
+        macroCandidatesLoading={macroCandidatesLoading}
+        selectedMacroDateCol={selectedMacroDateCol}
+        setSelectedMacroDateCol={setSelectedMacroDateCol}
+        macroColumns={macroColumns}
+        macroDateColUsed={macroDateColUsed}
+        macroLoading={macroLoading}
+        macroError={macroError}
+        fetchMacroFeatures={fetchMacroFeatures}
+        handleReFetchMacro={handleReFetchMacro}
+      />
+
+      {/* Integration flow */}
+      <IntegrationFlowDiagram nodes={flowNodes} hasWarning={Boolean(integrationReport?.warnings?.length)} />
 
       {/* Relationships */}
       {(loanTable || collateralTable) && customerFile && dbFile ? (
-        <div className="rounded-xl border border-border bg-card p-5 shadow-elegant">
-          {relError ? <p className="mb-3 text-xs text-red-500">{relError}</p> : null}
-
-          <div className="space-y-3">
-            {loanTable ? (
-              <JoinRow
-                leftLabel="customer"
-                rightLabel={loanTable}
-                leftColumns={customerColumns}
-                rightColumns={loanColumns}
-                value={customerLoanJoin}
-                onChange={setCustomerLoanJoin}
-                candidate={bestCandidate(candidates, "customer", loanTable)}
-              />
-            ) : null}
-            {loanTable && collateralTable ? (
-              <JoinRow
-                leftLabel={loanTable}
-                rightLabel={collateralTable}
-                leftColumns={loanColumns}
-                rightColumns={collateralColumns}
-                value={loanCollateralJoin}
-                onChange={setLoanCollateralJoin}
-                candidate={bestCandidate(candidates, loanTable, collateralTable)}
-              />
-            ) : null}
-          </div>
-        </div>
+        <RelationshipHealth
+          loanTable={loanTable}
+          collateralTable={collateralTable}
+          customerColumns={customerColumns}
+          loanColumns={loanColumns}
+          collateralColumns={collateralColumns}
+          customerLoanJoin={customerLoanJoin}
+          setCustomerLoanJoin={setCustomerLoanJoin}
+          loanCollateralJoin={loanCollateralJoin}
+          setLoanCollateralJoin={setLoanCollateralJoin}
+          customerLoanCandidate={customerLoanCandidate}
+          loanCollateralCandidate={loanCollateralCandidate}
+          relLoading={relLoading}
+          relError={relError}
+        />
       ) : null}
 
-      <div className="flex justify-end">
-        <Button onClick={runIntegration} disabled={!canIntegrate || integrating} className="gap-2">
+      {/* Integrate action */}
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-[12.5px] text-slate-500">
+          {integrationReport
+            ? "Sources integrated. Re-run integration any time you change a table or join selection above."
+            : customerFile
+            ? "Configure your data sources above, then integrate to build the modelling dataset."
+            : "Upload customer data to get started."}
+        </div>
+        <button
+          type="button"
+          onClick={runIntegration}
+          disabled={!canIntegrate || integrating}
+          className="flex flex-shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {integrating && <Loader className="h-4 w-4 animate-spin" />}
           {integrating ? "Integrating…" : "Integrate sources"}
           <ArrowRight className="h-4 w-4" />
-        </Button>
+        </button>
       </div>
-      {integrateError ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{integrateError}</div> : null}
-
-      {/* Loaded sources + integration preview */}
-      {integrationReport ? (
-        <>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-muted-foreground" />
-              <h3 className="text-sm font-semibold">Loaded sources</h3>
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
-              {integrationReport.sources.map((s: any) => (
-                <div key={s.name} className="rounded-lg border border-border bg-background px-3 py-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> {s.name}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">{s.rows.toLocaleString()} rows · {s.columns} cols</div>
-                </div>
-              ))}
-              {integrationReport.macro_series?.length ? (
-                <div className="rounded-lg border border-border bg-background px-3 py-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> FRED
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">{integrationReport.macro_series.join(", ")}</div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Landmark className="h-5 w-5 text-muted-foreground" />
-                <h3 className="text-sm font-semibold">Integrated dataset</h3>
-              </div>
-              <button type="button" onClick={downloadReport} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
-                <Download className="h-3.5 w-3.5" /> Integration report
-              </button>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-3">
-              <Stat label="Rows" value={integrationReport.rows_after.toLocaleString()} />
-              <Stat label="Columns" value={integrationReport.columns_after.toLocaleString()} />
-              <Stat label="Sources" value={String(integrationReport.sources.length + (integrationReport.macro_series?.length ? 1 : 0))} />
-            </div>
-            {integrationReport.warnings?.length ? (
-              <div className="mt-4 space-y-1.5">
-                {integrationReport.warnings.map((w: string, i: number) => (
-                  <div key={i} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">{w}</div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </>
+      {integrateError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{integrateError}</div>
       ) : null}
 
-      {hasExplicitDataset && profile ? (
-        <>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <div className="flex items-center gap-2">
-              <Table2 className="h-5 w-5 text-muted-foreground" />
-              <h3 className="text-sm font-semibold">Dataset preview</h3>
-            </div>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="px-2 py-2">#</th>
-                    {(profile.columns ?? []).map((column) => (
-                      <th key={column} className="px-2 py-2">{column}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(profile.data_preview ?? []).map((row: Record<string, any>, rowIndex: number) => (
-                    <tr key={rowIndex} className={rowIndex % 2 === 0 ? "bg-background" : "bg-card"}>
-                      <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">{rowIndex + 1}</td>
-                      {(profile.columns ?? []).map((column) => (
-                        <td key={`${rowIndex}-${column}`} className="whitespace-nowrap px-2 py-2 text-xs text-foreground/90">
-                          {row[column] ?? ""}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      {/* Post-integration readiness */}
+      {integrationReport ? (
+        <DatasetReadinessPanel
+          integrationReport={integrationReport}
+          joinHealthPct={joinHealthPct}
+          isReady={isReady}
+          downloadReport={downloadReport}
+        />
+      ) : null}
 
-          <div className="flex justify-end gap-3 pt-4">
-            <Button onClick={() => navigate({ to: "/profiling" })} className="gap-2">
+      {isReady && profile ? (
+        <>
+          <DatasetPreviewTable profile={profile} />
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/profiling" })}
+              className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+            >
               Proceed to Data Profiling
               <ArrowRight className="h-4 w-4" />
-            </Button>
+            </button>
           </div>
         </>
       ) : (
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+        <div className="rounded-xl border border-slate-200 bg-white p-6">
           <div className="flex items-center gap-2">
-            <Info className="h-5 w-5 text-muted-foreground" />
-            <h4 className="text-sm font-semibold">Welcome to Aegis Credit</h4>
+            <Info className="h-5 w-5 text-slate-400" />
+            <h4 className="text-sm font-semibold text-slate-800">Welcome to Aegis Credit</h4>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-slate-500">
             Upload customer data, connect a loan/collateral database, and optionally attach FRED macro data — the
             platform discovers how they relate and builds one integrated dataset for modelling.
           </p>
         </div>
       )}
+
+      {/* Pipeline progress */}
+      <PipelineProgress steps={pipelineSteps} />
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+// ── Presentational helpers (all props-driven — no new state/fetches) ─────────
+
+function StatusBadge({ status, label }: { status: SourceStatus; label: string }) {
+  const styles: Record<SourceStatus, { chip: string; dot: string }> = {
+    connected: { chip: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
+    pending: { chip: "bg-slate-100 text-slate-500", dot: "bg-slate-400" },
+    warning: { chip: "bg-amber-50 text-amber-700", dot: "bg-amber-500" },
+  };
+  const s = styles[status];
   return (
-    <div className="rounded-lg bg-muted/50 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide ${s.chip}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {label}
+    </span>
+  );
+}
+
+function KPITile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`flex flex-col gap-1 rounded-xl border px-4 py-4 ${accent ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"}`}>
+      <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">{label}</span>
+      <span className={`font-mono text-2xl font-semibold leading-tight ${accent ? "text-blue-700" : "text-slate-900"}`}>{value}</span>
+      {sub && <span className="text-[11px] text-slate-400">{sub}</span>}
     </div>
   );
 }
 
-function JoinRow({
-  leftLabel, rightLabel, leftColumns, rightColumns, value, onChange, candidate,
+function SummaryRow({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between border-b border-slate-100 py-1.5 last:border-0">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className={`max-w-[60%] truncate text-right text-[12.5px] font-medium text-slate-800 ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function Dropzone({
+  active, icon, title, subtitle, onClick, onDrop,
 }: {
-  leftLabel: string;
-  rightLabel: string;
-  leftColumns: string[];
-  rightColumns: string[];
-  value: { left: string; right: string } | null;
-  onChange: (v: { left: string; right: string }) => void;
-  candidate?: JoinCandidate | null;
+  active: boolean;
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+  onDrop: (f: File) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-foreground">{leftLabel}</span>
-        <select
-          value={value?.left ?? ""}
-          onChange={(e) => onChange({ left: e.target.value, right: value?.right ?? "" })}
-          className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-        >
-          <option value="">select column</option>
-          {leftColumns.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-medium text-foreground">{rightLabel}</span>
-        <select
-          value={value?.right ?? ""}
-          onChange={(e) => onChange({ left: value?.left ?? "", right: e.target.value })}
-          className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-        >
-          <option value="">select column</option>
-          {rightColumns.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        {candidate ? (
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {candidate.cardinality}
-            </span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {Math.round(candidate.confidence * 100)}% confidence
-            </span>
-          </span>
-        ) : (
-          <span className="ml-auto shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-            no suggestion — select manually
-          </span>
-        )}
+    <div
+      onClick={onClick}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const f = e.dataTransfer?.files?.[0];
+        if (f) onDrop(f);
+      }}
+      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors ${
+        active ? "border-blue-200 bg-blue-50 hover:border-blue-300" : "border-slate-200 bg-slate-50 hover:border-blue-300"
+      }`}
+    >
+      <div className={active ? "text-blue-500" : "text-slate-400"}>{icon}</div>
+      <div className={`break-all text-[13px] font-semibold ${active ? "text-blue-700" : "text-slate-600"}`}>{title}</div>
+      <div className="text-[11px] text-slate-400">{subtitle}</div>
+    </div>
+  );
+}
+
+function ChevronSelect({
+  value, onChange, children, className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12.5px] text-slate-700 outline-none focus:border-blue-400"
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+    </div>
+  );
+}
+
+function SourceOverviewCard({
+  icon, name, subtitle, status, rows, cols, detail,
+}: {
+  icon: ReactNode;
+  name: string;
+  subtitle: string;
+  status: SourceStatus;
+  rows: string;
+  cols: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">{icon}</div>
+          <div>
+            <div className="text-[13px] font-semibold text-slate-800">{name}</div>
+            <div className="text-[11px] text-slate-400">{subtitle}</div>
+          </div>
+        </div>
+        <StatusBadge status={status} label={status === "connected" ? "CONNECTED" : status === "warning" ? "WARNING" : "PENDING"} />
       </div>
-      {candidate?.reasons?.length ? (
-        <ul className="mt-1.5 space-y-0.5 pl-1 text-[11px] text-muted-foreground">
-          {candidate.reasons.map((r, i) => (
-            <li key={i}>— {r}</li>
-          ))}
-        </ul>
+      <div className="flex items-center gap-4 border-t border-slate-100 pt-3">
+        <div>
+          <div className="font-mono text-[15px] font-semibold text-slate-800">{rows}</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">rows</div>
+        </div>
+        <div>
+          <div className="font-mono text-[15px] font-semibold text-slate-800">{cols}</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">columns</div>
+        </div>
+        <div className="ml-auto max-w-[45%] text-right">
+          <div className="truncate font-mono text-[11px] text-slate-400" title={detail}>{detail}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceWorkspace({
+  customerInputRef, dbInputRef,
+  customerFile, customerColumns, onCustomerFileChosen,
+  dbFile, dbTables, dbLoading, dbError, onDbFileChosen,
+  loanTable, collateralTable, onLoanTableChange, onCollateralTableChange,
+  macroCandidates, macroCandidatesLoading, selectedMacroDateCol, setSelectedMacroDateCol,
+  macroColumns, macroDateColUsed, macroLoading, macroError, fetchMacroFeatures, handleReFetchMacro,
+}: {
+  customerInputRef: RefObject<HTMLInputElement | null>;
+  dbInputRef: RefObject<HTMLInputElement | null>;
+  customerFile: File | null;
+  customerColumns: string[];
+  onCustomerFileChosen: (f: File | null) => void;
+  dbFile: File | null;
+  dbTables: TableInfo[] | null;
+  dbLoading: boolean;
+  dbError: string | null;
+  onDbFileChosen: (f: File | null) => void;
+  loanTable: string;
+  collateralTable: string;
+  onLoanTableChange: (t: string) => void;
+  onCollateralTableChange: (t: string) => void;
+  macroCandidates: MacroDateCandidate[];
+  macroCandidatesLoading: boolean;
+  selectedMacroDateCol: string;
+  setSelectedMacroDateCol: (v: string) => void;
+  macroColumns: string[];
+  macroDateColUsed: string | null;
+  macroLoading: boolean;
+  macroError: string | null;
+  fetchMacroFeatures: () => void;
+  handleReFetchMacro: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"csv" | "sqlite" | "macro">("csv");
+
+  const tabs: { key: "csv" | "sqlite" | "macro"; label: string; icon: ReactNode }[] = [
+    { key: "csv", label: "Customer CSV", icon: <FileSpreadsheet className="h-4 w-4" /> },
+    { key: "sqlite", label: "SQLite Database", icon: <Database className="h-4 w-4" /> },
+    { key: "macro", label: "Macroeconomic", icon: <TrendingUp className="h-4 w-4" /> },
+  ];
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex border-b border-slate-200 bg-slate-50">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-2 border-b-2 px-5 py-3 text-[12.5px] font-medium transition-colors ${
+              activeTab === tab.key ? "border-blue-600 bg-white text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <span className={activeTab === tab.key ? "text-blue-600" : "text-slate-400"}>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 p-5 md:grid-cols-2">
+        {/* LEFT: controls */}
+        <div>
+          {activeTab === "csv" && (
+            <div>
+              <input
+                ref={customerInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => onCustomerFileChosen(e.target.files?.[0] ?? null)}
+              />
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Source File</div>
+              <Dropzone
+                active={Boolean(customerFile)}
+                icon={<Upload className="h-6 w-6" />}
+                title={customerFile ? customerFile.name : "Click or drop a CSV file here"}
+                subtitle={customerFile ? "Click to replace or drag a new file" : "Supports .csv (UTF-8)."}
+                onClick={() => customerInputRef.current?.click()}
+                onDrop={onCustomerFileChosen}
+              />
+            </div>
+          )}
+
+          {activeTab === "sqlite" && (
+            <div>
+              <input
+                ref={dbInputRef}
+                type="file"
+                accept=".db,.sqlite,.sqlite3"
+                className="hidden"
+                onChange={(e) => onDbFileChosen(e.target.files?.[0] ?? null)}
+              />
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Database File</div>
+              <Dropzone
+                active={Boolean(dbFile)}
+                icon={<Database className="h-6 w-6" />}
+                title={dbFile ? dbFile.name : "Click or drop a SQLite file here"}
+                subtitle="Accepts .db, .sqlite, .sqlite3"
+                onClick={() => dbInputRef.current?.click()}
+                onDrop={onDbFileChosen}
+              />
+              {dbLoading ? <div className="mt-2 text-xs text-slate-400">Inspecting database…</div> : null}
+              {dbError ? <div className="mt-2 text-xs text-red-500">{dbError}</div> : null}
+
+              {dbTables ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-slate-500">Loan table</div>
+                    <ChevronSelect value={loanTable} onChange={onLoanTableChange}>
+                      <option value="">— none —</option>
+                      {dbTables.map((t) => (
+                        <option key={t.table} value={t.table}>{t.table} ({t.row_count} rows)</option>
+                      ))}
+                    </ChevronSelect>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-[11px] font-medium text-slate-500">
+                      Collateral table <span className="text-slate-400">(optional)</span>
+                    </div>
+                    <ChevronSelect value={collateralTable} onChange={onCollateralTableChange}>
+                      <option value="">— none —</option>
+                      {dbTables.map((t) => (
+                        <option key={t.table} value={t.table}>{t.table} ({t.row_count} rows)</option>
+                      ))}
+                    </ChevronSelect>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {activeTab === "macro" && (
+            <div>
+              {customerFile ? (
+                macroColumns.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                      Macro data attached: {macroColumns.join(", ")}
+                      {macroDateColUsed ? <> (matched to the month of <code className="font-mono">{macroDateColUsed}</code>)</> : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleReFetchMacro}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Re-fetch / change date column
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Loan Origination Date Column</div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Auto-detected below — change it if a different date column is the right one to align macro data to.
+                      </p>
+                      {macroCandidatesLoading ? (
+                        <div className="mt-2 flex w-full max-w-md items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                          <Loader className="h-4 w-4 animate-spin" />
+                          Detecting date column…
+                        </div>
+                      ) : macroCandidates.length > 0 ? (
+                        <ChevronSelect value={selectedMacroDateCol} onChange={setSelectedMacroDateCol} className="mt-2 max-w-md">
+                          {macroCandidates.map(({ column, is_preferred }) => (
+                            <option key={column} value={column}>
+                              {is_preferred ? `⭐ ${column} (origination/loan date)` : column}
+                            </option>
+                          ))}
+                        </ChevronSelect>
+                      ) : (
+                        <div className="mt-2 w-full max-w-md rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                          No date columns detected
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Optionally enrich the dataset with macroeconomic indicators from FRED. The FRED integration is configured server-side.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!selectedMacroDateCol || macroLoading || macroCandidatesLoading}
+                      onClick={fetchMacroFeatures}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {macroLoading ? <Loader className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                      Fetch FRED macro features
+                    </button>
+                    {macroError ? (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{macroError}</div>
+                    ) : null}
+                  </div>
+                )
+              ) : (
+                <div className="text-sm text-slate-400">Upload a Customer CSV first to enable macroeconomic enrichment.</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: live connection summary */}
+        <div className="border-t border-slate-100 pt-6 md:border-l md:border-t-0 md:pl-6 md:pt-0">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Connection Summary</div>
+          {activeTab === "csv" && (
+            <div>
+              <SummaryRow label="File name" value={customerFile?.name ?? "—"} mono />
+              <SummaryRow label="Columns detected" value={customerFile ? String(customerColumns.length) : "—"} mono />
+              <SummaryRow label="Rows detected" value={customerFile ? "Available after integration" : "—"} />
+              <SummaryRow
+                label="Upload status"
+                value={<StatusBadge status={customerFile ? "connected" : "pending"} label={customerFile ? "UPLOADED" : "PENDING"} />}
+              />
+            </div>
+          )}
+          {activeTab === "sqlite" && (
+            <div>
+              <SummaryRow label="Database name" value={dbFile?.name ?? "—"} mono />
+              <SummaryRow label="Discovered tables" value={dbTables ? `${dbTables.length} tables` : "—"} mono />
+              <SummaryRow label="Selected loan table" value={loanTable || "— none —"} mono />
+              <SummaryRow label="Collateral table" value={collateralTable ? `${collateralTable} (optional)` : "— none — (optional)"} mono />
+              <SummaryRow
+                label="Status"
+                value={<StatusBadge status={dbFile ? "connected" : "pending"} label={dbFile ? "CONNECTED" : "PENDING"} />}
+              />
+            </div>
+          )}
+          {activeTab === "macro" && (
+            <div>
+              <SummaryRow label="Date column" value={macroDateColUsed ?? selectedMacroDateCol ?? "—"} mono />
+              <SummaryRow label="Macro availability" value={macroColumns.length > 0 ? `${macroColumns.length} series attached` : "Not fetched yet"} />
+              <SummaryRow label="Alignment" value="Per-record date matching" />
+              <SummaryRow
+                label="Status"
+                value={<StatusBadge status={macroColumns.length > 0 ? "connected" : "pending"} label={macroColumns.length > 0 ? "READY" : "PENDING"} />}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationFlowDiagram({ nodes, hasWarning }: { nodes: FlowNode[]; hasWarning: boolean }) {
+  const palette: Record<SourceStatus, { text: string; bg: string; border: string }> = {
+    connected: { text: "#059669", bg: "#ECFDF5", border: "#A7F3D0" },
+    warning: { text: "#D97706", bg: "#FFFBEB", border: "#FDE68A" },
+    pending: { text: "#94A3B8", bg: "#F8FAFC", border: "#E2E8F0" },
+  };
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Data Integration Flow</h3>
+          <p className="mt-0.5 text-xs text-slate-400">How source datasets become the modelling dataset</p>
+        </div>
+        {hasWarning ? <StatusBadge status="warning" label="JOIN WARNING" /> : null}
+      </div>
+      <div className="flex items-center gap-0 overflow-x-auto py-2">
+        {nodes.map((node, i) => {
+          const c = palette[node.state];
+          return (
+            <div key={node.key} className="flex items-center">
+              <div
+                className="flex min-w-[140px] flex-shrink-0 flex-col items-center gap-1.5 rounded-xl border px-4 py-3"
+                style={{ background: c.bg, borderColor: c.border }}
+              >
+                <div className="flex items-center gap-1.5">
+                  {node.state === "warning" ? (
+                    <AlertTriangle className="h-3.5 w-3.5" style={{ color: c.text }} />
+                  ) : node.state === "connected" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" style={{ color: c.text }} />
+                  ) : (
+                    <span className="h-2 w-2 rounded-full bg-slate-300" />
+                  )}
+                  <span className="whitespace-nowrap text-xs font-semibold" style={{ color: c.text }}>{node.label}</span>
+                </div>
+                <span className="text-center text-[10.5px] leading-tight text-slate-500">{node.sub}</span>
+              </div>
+              {i < nodes.length - 1 ? (
+                <div className="flex flex-shrink-0 items-center px-1">
+                  <div className="h-px w-4 bg-slate-300" />
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RelationshipCard({
+  sourceLabel, targetLabel, sourceColumns, targetColumns, value, onChange, candidate,
+}: {
+  sourceLabel: string;
+  targetLabel: string;
+  sourceColumns: string[];
+  targetColumns: string[];
+  value: { left: string; right: string } | null;
+  onChange: (v: { left: string; right: string }) => void;
+  candidate: JoinCandidate | null;
+}) {
+  const warning = !candidate;
+  const confidencePct = candidate ? Math.round(candidate.confidence * 100) : null;
+  const accentColor = warning ? "#D97706" : "#059669";
+  return (
+    <div className={`rounded-xl border p-4 ${warning ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+      <div className="mb-3 flex items-center gap-3">
+        <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-400">Source</div>
+          <div className="truncate font-mono text-xs font-semibold text-slate-800" title={sourceLabel}>{sourceLabel}</div>
+          <select
+            value={value?.left ?? ""}
+            onChange={(e) => onChange({ left: e.target.value, right: value?.right ?? "" })}
+            className="mt-1 w-full rounded border-0 bg-transparent text-center font-mono text-[11px] text-blue-600 outline-none"
+          >
+            <option value="">select column</option>
+            {sourceColumns.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div className="flex flex-shrink-0 flex-col items-center gap-0.5">
+          {candidate ? (
+            <div className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accentColor }}>
+              {candidate.cardinality}
+            </div>
+          ) : null}
+          <ChevronRight className="h-4 w-4" style={{ color: accentColor }} />
+          {confidencePct !== null ? <div className="whitespace-nowrap text-[10px] text-slate-500">{confidencePct}% conf.</div> : null}
+        </div>
+
+        <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-400">Target</div>
+          <div className="truncate font-mono text-xs font-semibold text-slate-800" title={targetLabel}>{targetLabel}</div>
+          <select
+            value={value?.right ?? ""}
+            onChange={(e) => onChange({ left: value?.left ?? "", right: e.target.value })}
+            className="mt-1 w-full rounded border-0 bg-transparent text-center font-mono text-[11px] text-blue-600 outline-none"
+          >
+            <option value="">select column</option>
+            {targetColumns.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {confidencePct !== null ? (
+        <div className="mb-2.5">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] font-medium text-slate-500">Join confidence</span>
+            <span className="font-mono text-[11px] font-semibold" style={{ color: accentColor }}>{confidencePct}%</span>
+          </div>
+          <div className="h-1 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full" style={{ width: `${confidencePct}%`, background: accentColor }} />
+          </div>
+        </div>
       ) : null}
+
+      {candidate?.reasons?.length ? (
+        <div className="space-y-1">
+          {candidate.reasons.map((r, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-[10.5px] text-slate-500">
+              <span className="mt-0.5 flex-shrink-0" style={{ color: accentColor }}>—</span>
+              {r}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {warning ? (
+        <div className="mt-2.5 flex items-center gap-1.5 text-[10.5px] font-medium text-amber-700">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          No suggestion — select the join columns manually
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RelationshipHealth({
+  loanTable, collateralTable, customerColumns, loanColumns, collateralColumns,
+  customerLoanJoin, setCustomerLoanJoin, loanCollateralJoin, setLoanCollateralJoin,
+  customerLoanCandidate, loanCollateralCandidate, relLoading, relError,
+}: {
+  loanTable: string;
+  collateralTable: string;
+  customerColumns: string[];
+  loanColumns: string[];
+  collateralColumns: string[];
+  customerLoanJoin: { left: string; right: string } | null;
+  setCustomerLoanJoin: (v: { left: string; right: string }) => void;
+  loanCollateralJoin: { left: string; right: string } | null;
+  setLoanCollateralJoin: (v: { left: string; right: string }) => void;
+  customerLoanCandidate: JoinCandidate | null;
+  loanCollateralCandidate: JoinCandidate | null;
+  relLoading: boolean;
+  relError: string | null;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Integration Health</h3>
+          <p className="mt-0.5 text-xs text-slate-400">Detected source relationships and join quality</p>
+        </div>
+        {relLoading ? <span className="text-xs text-slate-400">Detecting relationships…</span> : null}
+      </div>
+      {relError ? <p className="mb-3 text-xs text-red-500">{relError}</p> : null}
+      <div className="grid gap-4 md:grid-cols-2">
+        {loanTable ? (
+          <RelationshipCard
+            sourceLabel="customer"
+            targetLabel={loanTable}
+            sourceColumns={customerColumns}
+            targetColumns={loanColumns}
+            value={customerLoanJoin}
+            onChange={setCustomerLoanJoin}
+            candidate={customerLoanCandidate}
+          />
+        ) : null}
+        {loanTable && collateralTable ? (
+          <RelationshipCard
+            sourceLabel={loanTable}
+            targetLabel={collateralTable}
+            sourceColumns={loanColumns}
+            targetColumns={collateralColumns}
+            value={loanCollateralJoin}
+            onChange={setLoanCollateralJoin}
+            candidate={loanCollateralCandidate}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DatasetReadinessPanel({
+  integrationReport, joinHealthPct, isReady, downloadReport,
+}: {
+  integrationReport: any;
+  joinHealthPct: number | null;
+  isReady: boolean;
+  downloadReport: () => void;
+}) {
+  const warnings: string[] = integrationReport.warnings ?? [];
+  const totalSources = (integrationReport.sources?.length ?? 0) + (integrationReport.macro_series?.length ? 1 : 0);
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+            <Landmark className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Integrated Dataset</h3>
+            <p className="text-[11px] text-slate-400">Dataset readiness summary after source integration</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={downloadReport}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-slate-700"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Integration report
+        </button>
+      </div>
+
+      <div className="p-5">
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <KPITile label="Rows" value={integrationReport.rows_after.toLocaleString()} sub="After integration" />
+          <KPITile label="Columns" value={String(integrationReport.columns_after)} sub="Across all sources" />
+          <KPITile label="Sources" value={String(totalSources)} sub="Connected inputs" />
+          <KPITile
+            label="Join Health"
+            value={joinHealthPct !== null ? `${joinHealthPct}%` : "—"}
+            sub={warnings.length ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "No warnings"}
+          />
+          <KPITile label="Dataset Status" value={isReady ? "READY" : "PROCESSING"} sub={isReady ? "Ready for profiling" : "Finalizing"} accent />
+        </div>
+
+        {warnings.length > 0 ? (
+          <div className="space-y-2">
+            {warnings.map((w, i) => (
+              <div key={i} className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+                <div className="text-[11.5px] text-amber-800">{w}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DatasetPreviewTable({ profile }: { profile: any }) {
+  const columns: string[] = profile.columns ?? [];
+  const rows: Record<string, any>[] = profile.data_preview ?? [];
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+            <Table2 className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Dataset Preview</h3>
+            <p className="text-[11px] text-slate-400">{rows.length} row{rows.length === 1 ? "" : "s"} shown · {columns.length} columns</p>
+          </div>
+        </div>
+        <StatusBadge status="connected" label="INTEGRATED" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11.5px]">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              <th className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">#</th>
+              {columns.map((c) => (
+                <th key={c} className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                <td className="whitespace-nowrap px-4 py-2 font-mono text-slate-400">{i + 1}</td>
+                {columns.map((c) => (
+                  <td key={`${i}-${c}`} className="whitespace-nowrap px-4 py-2 font-mono text-slate-700">{row[c] ?? ""}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PipelineProgress({ steps }: { steps: { label: string; sub: string; status: "done" | "active" | "pending" }[] }) {
+  const cfg = {
+    done: { dot: "bg-emerald-500 ring-emerald-100", label: "text-emerald-700", sub: "text-emerald-500", line: "bg-emerald-400" },
+    active: { dot: "bg-blue-600 ring-4 ring-blue-200", label: "font-semibold text-blue-700", sub: "text-blue-500", line: "bg-slate-200" },
+    pending: { dot: "bg-slate-300 ring-slate-100", label: "text-slate-400", sub: "text-slate-300", line: "bg-slate-200" },
+  } as const;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-6 py-5">
+      <div className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Integration Readiness Pipeline</div>
+      <div className="flex items-center">
+        {steps.map((step, i) => {
+          const c = cfg[step.status];
+          return (
+            <div key={step.label} className="flex flex-1 items-center">
+              <div className="flex flex-col items-center gap-1.5">
+                <div className={`h-3 w-3 rounded-full ring-2 ${c.dot}`} />
+                <div className={`whitespace-nowrap text-[10px] font-semibold tracking-wide ${c.label}`}>{step.label}</div>
+                {step.sub ? <div className={`text-[9.5px] ${c.sub}`}>{step.sub}</div> : null}
+              </div>
+              {i < steps.length - 1 ? <div className={`mx-2 h-px flex-1 ${c.line}`} /> : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import { Route as DevelopmentRouteImport } from './routes/development'
 import { Route as DataUploadRouteImport } from './routes/data-upload'
 import { Route as DataPreparationRouteImport } from './routes/data-preparation'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ModelInventoryRouteImport } from './routes/model-inventory'
 import { Route as ValidationIndexRouteImport } from './routes/validation.index'
 import { Route as ValidationStressRouteImport } from './routes/validation.stress'
@@ -114,6 +115,11 @@ const ModelTrainingEvaluationRoute = ModelTrainingEvaluationRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelInventoryRoute = ModelInventoryRouteImport.update({
@@ -256,6 +262,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity-log'
+    | '/dashboard'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -284,6 +291,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/activity-log'
+    | '/dashboard'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -311,6 +319,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/activity-log'
+    | '/dashboard'
     | '/data-preparation'
     | '/data-upload'
     | '/development'
@@ -339,6 +348,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityLogRoute: typeof ActivityLogRoute
+  DashboardRoute: typeof DashboardRoute
   DataPreparationRoute: typeof DataPreparationRoute
   DataUploadRoute: typeof DataUploadRoute
   DevelopmentRoute: typeof DevelopmentRoute
@@ -363,6 +373,13 @@ declare module '@tanstack/react-router' {
       path: '/activity-log'
       fullPath: '/activity-log'
       preLoaderRoute: typeof ActivityLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/validation': {
@@ -574,6 +591,7 @@ const ValidationRouteWithChildren = ValidationRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityLogRoute: ActivityLogRoute,
+  DashboardRoute: DashboardRoute,
   DataPreparationRoute: DataPreparationRoute,
   DataUploadRoute: DataUploadRoute,
   DevelopmentRoute: DevelopmentRoute,

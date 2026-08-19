@@ -1,7 +1,6 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   UploadCloud,
-  Database,
   ShieldCheck,
   Layers,
   Cpu,
@@ -9,8 +8,6 @@ import {
   Settings,
   Bell,
   Search,
-  ChevronsLeft,
-  ChevronsRight,
   Home,
   FileText,
   GitCompareArrows,
@@ -18,32 +15,21 @@ import {
   Activity,
   ClipboardCheck,
   History,
+  ChevronDown,
+  Database,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 
-const LAST_WORKSPACE_KEY = "aegis_last_workspace";
-
 type NavItem = { to: string; label: string; icon: typeof Home; exact?: boolean };
 
-const workflowSteps: Array<{ to: string; label: string }> = [
-  { to: "/data-upload", label: "Data Upload" },
-  { to: "/data-preparation", label: "Data Preparation & Feature Engineering" },
-  { to: "/model-training-evaluation", label: "Model Training & Evaluation" },
-  { to: "/explainability", label: "Explainability" },
-];
-
 const developmentNav: NavItem[] = [
+  { to: "/dashboard", label: "Dashboard", icon: Home },
   { to: "/data-upload", label: "Data Upload", icon: UploadCloud },
   { to: "/data-preparation", label: "Data Preparation & Feature Engineering", icon: Layers },
   { to: "/model-training-evaluation", label: "Model Training & Evaluation", icon: Cpu },
   { to: "/explainability", label: "Explainability", icon: Sparkles },
-  { to: "/activity-log", label: "Activity Log", icon: History },
-];
-
-const inventoryNav: NavItem[] = [
-  { to: "/model-inventory", label: "Model Inventory", icon: Database, exact: true },
   { to: "/activity-log", label: "Activity Log", icon: History },
 ];
 
@@ -55,73 +41,31 @@ const validationNav: NavItem[] = [
   { to: "/validation/stress", label: "Stress & Backtesting", icon: Activity },
   { to: "/validation/regulatory", label: "Explainability and Fairness", icon: ShieldCheck },
   { to: "/validation/findings", label: "Findings & Final Report", icon: ClipboardCheck },
-  { to: "/activity-log", label: "Activity Log", icon: History },
 ];
 
-const developmentPaths = [
-  ...developmentNav.map((n) => n.to),
-  "/pd",
-];
+const enterpriseNav: NavItem[] = [{ to: "/model-inventory", label: "Model Inventory", icon: Database }];
+const platformNav: NavItem[] = [{ to: "/settings", label: "Settings", icon: Settings }];
 
-const inventoryPaths = ["/model-inventory"];
-
-// Strict resolution from the URL alone — "/settings" isn't part of either
-// workspace's path list, so this correctly returns "landing" for it. The
-// component below layers last-known-workspace memory on top of this so
-// Settings (and any other neutral page) shows whichever workspace the user
-// was actually in, instead of always falling back to landing.
-function resolveWorkspace(pathname: string): "landing" | "development" | "validation" | "inventory" {
-  if (pathname === "/") return "landing";
-  if (pathname.startsWith("/validation")) return "validation";
-  if (inventoryPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) return "inventory";
-  if (developmentPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) return "development";
-  return "landing";
-}
-
-function resolveActiveModelTab(pathname: string): ModelTab["key"] {
-  if (pathname.startsWith("/pd") || [
-    "/data-upload",
-    "/data-preparation",
-    "/model-training-evaluation",
-    "/explainability",
-    "/settings",
-    "/development",
-  ].includes(pathname)) {
-    return "pd";
-  }
-  return "pd";
-}
-
-function NavLinkItem({
-  item,
-  pathname,
-  collapsed,
-}: {
-  item: NavItem;
-  pathname: string;
-  collapsed: boolean;
-}) {
+function NavLinkItem({ item, pathname }: { item: NavItem; pathname: string }) {
   const Icon = item.icon;
   const active = item.exact ? pathname === item.to : pathname === item.to || pathname.startsWith(item.to + "/");
+
   return (
     <li>
       <Link
         to={item.to}
         className={cn(
-          "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-          active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground"
-            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+          "group flex items-center rounded-lg px-3 py-2 text-[14px] font-medium leading-[1.25rem] tracking-[-0.01em] transition-colors",
+          active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
         )}
       >
         <Icon
           className={cn(
-            "h-[18px] w-[18px] shrink-0",
-            active ? "text-primary" : "text-sidebar-foreground/60 group-hover:text-primary",
+            "h-[16px] w-[16px] shrink-0 stroke-[2]",
+            active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-accent-foreground",
           )}
         />
-        {!collapsed && <span className="truncate">{item.label}</span>}
-        {!collapsed && active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+        <span className="ml-3 truncate">{item.label}</span>
       </Link>
     </li>
   );
@@ -135,132 +79,91 @@ function initialsFromName(name: string): string {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isLoginPage = pathname === "/login";
-  const strictWorkspace = resolveWorkspace(pathname);
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-
-  // Remember whichever real workspace (development/validation) the user was
-  // last in, so neutral pages like /settings — which aren't part of either
-  // workspace's own path list — can show that workspace's sidebar/toggle
-  // instead of always falling back to the landing page's static CTAs.
-  const [lastWorkspace, setLastWorkspace] = useState<"development" | "validation" | "inventory">(() => {
-    if (typeof window === "undefined") return "development";
-    const stored = window.localStorage.getItem(LAST_WORKSPACE_KEY);
-    return stored === "validation" || stored === "inventory" ? stored : "development";
-  });
-
-  useEffect(() => {
-    if (strictWorkspace === "development" || strictWorkspace === "validation" || strictWorkspace === "inventory") {
-      setLastWorkspace(strictWorkspace);
-      window.localStorage.setItem(LAST_WORKSPACE_KEY, strictWorkspace);
-    }
-  }, [strictWorkspace]);
-
-  const isNeutralPage = pathname === "/settings" || pathname === "/activity-log";
-  const workspace = isNeutralPage ? lastWorkspace : strictWorkspace;
-
-  const isLanding = workspace === "landing" || isLoginPage;
-  // Hide the shared model tabs on the Data Upload page per UX request
-  const showModelTabs = workspace === "development" && pathname !== "/data-upload";
-  const nav = workspace === "validation" ? validationNav : workspace === "inventory" ? inventoryNav : developmentNav;
-  const activeModelTab = resolveActiveModelTab(pathname);
-  const workspaceLabel = workspace === "validation"
-    ? "Model Validation"
-    : workspace === "development"
-    ? "Model Development"
-    : workspace === "inventory"
-    ? "Model Inventory"
-    : "Workspace";
+  const isLanding = pathname === "/" || isLoginPage;
+  const { user } = useAuth();
 
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
       {!isLanding && (
-        <aside
-          className={cn(
-            "sticky top-0 z-30 hidden h-screen shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-out md:flex",
-            collapsed ? "w-[76px]" : "w-[264px]",
-          )}
-        >
-          <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-primary shadow-elegant">
-              <ShieldCheck className="h-5 w-5 text-primary-foreground" />
+        <aside className="sticky top-0 z-30 hidden h-screen w-[264px] shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
+          <div className="flex h-[76px] items-center gap-3 border-b border-sidebar-border px-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary shadow-[0_8px_18px_rgba(37,99,235,0.32)]">
+              <ShieldCheck className="h-4 w-4 text-primary-foreground" />
             </div>
-            {!collapsed && (
-              <div className="flex flex-col leading-tight">
-                <span className="text-sm font-semibold tracking-tight">Credit Risk POC</span>
-                <span className="text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/60">
-                  {workspaceLabel}
-                </span>
-              </div>
-            )}
+            <div className="flex flex-col leading-[1.15]">
+              <span className="text-[15px] font-semibold tracking-[-0.02em] text-sidebar-foreground">Credit Risk POC</span>
+              <span className="mt-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
+                Model Development
+              </span>
+            </div>
           </div>
 
-          {!collapsed && (
-            <div className="px-3 pt-3">
-              <Link
-                to="/"
-                className="flex items-center gap-2 rounded-lg border border-sidebar-border/60 bg-sidebar-accent/30 px-3 py-2 text-xs font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              >
-                <Home className="h-3.5 w-3.5" />
-                Switch workspace
-              </Link>
-              <div className="mt-3 grid grid-cols-2 gap-1.5">
-                <Link
-                  to="/development"
-                  className={cn(
-                    "rounded-md px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                    workspace === "development"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-sidebar-accent/40 text-sidebar-foreground/70 hover:bg-sidebar-accent",
-                  )}
-                >
-                  Develop
-                </Link>
-                <Link
-                  to="/validation"
-                  className={cn(
-                    "rounded-md px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                    workspace === "validation"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-sidebar-accent/40 text-sidebar-foreground/70 hover:bg-sidebar-accent",
-                  )}
-                >
-                  Validate
-                </Link>
-                <Link
-                  to="/model-inventory"
-                  className={cn(
-                    "rounded-md px-2 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                    workspace === "inventory"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-sidebar-accent/40 text-sidebar-foreground/70 hover:bg-sidebar-accent",
-                  )}
-                >
-                  Inventory
-                </Link>
-              </div>
-            </div>
-          )}
+          <div className="flex-1 overflow-y-auto px-3 py-4">
+            <div className="space-y-5">
+              <section>
+                <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
+                  <span>Development</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-sidebar-foreground/60" />
+                </div>
+                <ul className="space-y-1">
+                  {developmentNav.map((item) => (
+                    <NavLinkItem key={item.to} item={item} pathname={pathname} />
+                  ))}
+                </ul>
+              </section>
 
-          <nav className="flex-1 overflow-y-auto px-3 py-4">
-            <ul className="space-y-1">
-              {nav.map((item) => (
-                <NavLinkItem key={item.to} item={item} pathname={pathname} collapsed={collapsed} />
-              ))}
-            </ul>
-          </nav>
+              <section>
+                <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
+                  <span>Validation</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-sidebar-foreground/60" />
+                </div>
+                <ul className="space-y-1">
+                  {validationNav.map((item) => (
+                    <NavLinkItem key={item.to} item={item} pathname={pathname} />
+                  ))}
+                </ul>
+              </section>
+
+              <section>
+                <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
+                  <span>Enterprise</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-sidebar-foreground/60" />
+                </div>
+                <ul className="space-y-1">
+                  {enterpriseNav.map((item) => (
+                    <NavLinkItem key={item.to} item={item} pathname={pathname} />
+                  ))}
+                </ul>
+              </section>
+
+              <section className="pt-2">
+                <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/60">
+                  <span>Platform</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-sidebar-foreground/60" />
+                </div>
+                <ul className="space-y-1">
+                  {platformNav.map((item) => (
+                    <NavLinkItem key={item.to} item={item} pathname={pathname} />
+                  ))}
+                </ul>
+              </section>
+            </div>
+          </div>
 
           <div className="border-t border-sidebar-border p-3">
-            <button
-              onClick={() => setCollapsed((c) => !c)}
-              className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-              {!collapsed && <span>Collapse</span>}
-            </button>
+            <div className="flex items-center gap-3 rounded-lg border border-sidebar-border bg-[#111827] px-3 py-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                {initialsFromName(user?.name ?? "Harshad")}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium text-sidebar-foreground">{user?.name ?? "Harshad"}</div>
+                <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/60">
+                  {user?.role ?? "MODEL GOVERNANCE ANALYST"}
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
       )}

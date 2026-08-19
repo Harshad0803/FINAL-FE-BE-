@@ -1,6 +1,8 @@
 import React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageHeader } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Card as UiCard } from "@/components/ui/card";
 import { ArrowRight, AlertCircle, Loader2, PlayCircle, Upload } from "lucide-react";
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
@@ -373,6 +375,10 @@ function Performance() {
         title="Stage 4 — Benchmarking"
         description="Compare the champion model against an industry-standard challenger before stress testing and regulatory review."
       />
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Benchmarking</Badge>
+        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Live comparison</Badge>
+      </div>
 
       {loading ? (
         <section className="flex items-center gap-2 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-elegant">
@@ -658,10 +664,10 @@ function Performance() {
 
 function Card({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+    <UiCard className="p-6 shadow-elegant">
       <h3 className="text-sm font-semibold">{title}</h3>
       {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
       <div className="mt-4 h-56">{children}</div>
-    </div>
+    </UiCard>
   );
 }

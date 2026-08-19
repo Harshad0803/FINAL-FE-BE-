@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import React from "react";
 import { PageHeader } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Card as UiCard } from "@/components/ui/card";
 import { ArrowRight, AlertTriangle, RefreshCw, Printer, ChevronDown, ChevronRight } from "lucide-react";
 import { ApiError, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
@@ -343,14 +345,18 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
         title="Stage 7 — Findings & Final Validation Report"
         description="SS1/23 P4.1/P5 · SS11/13 §13 — consolidated findings, verdict, and sign-off for the Model Risk Committee."
       />
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Final verdict</Badge>
+        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Findings register</Badge>
+      </div>
 
-      <section className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
+      <UiCard className="p-4 text-sm text-muted-foreground">
         {datasetReady ? (
           <>Using the shared dataset from Stage 1 / Stage 2: <span className="font-semibold text-foreground">{datasetName}</span>.</>
         ) : (
           <>No active dataset is available in shared state yet. Complete Stage 1 Intake and Stage 2 Data Validation first.</>
         )}
-      </section>
+      </UiCard>
 
       {loading ? (
         <div className="rounded-xl border border-border bg-card p-6 text-center">Compiling Stage 7 findings...</div>
@@ -407,7 +413,7 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
           </section>
 
           {/* Overall verdict banner */}
-          <section className={`rounded-xl border-2 ${verdictStyle.border} ${verdictStyle.bg} p-6 shadow-elegant`}>
+          <UiCard className={`border-2 ${verdictStyle.border} ${verdictStyle.bg} p-6 shadow-elegant`}>
             <h3 className="text-sm font-semibold">2. Overall Verdict</h3>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <div className={`text-2xl font-extrabold ${verdictStyle.text}`}>
@@ -424,7 +430,7 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
             <p className="mt-2 text-xs text-muted-foreground">
               Model: {ij.model_name ?? "N/A"} · Type: {ij.model_type ?? "N/A"} · Tier: {data.model_tier} · Date: {todayLabel()}
             </p>
-          </section>
+          </UiCard>
 
           {/* Findings tracker */}
           <section className="space-y-4">

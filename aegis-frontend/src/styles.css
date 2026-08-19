@@ -55,95 +55,95 @@
 
 :root {
   --radius: 0.75rem;
-  /* Deloitte-inspired: black/white/gray with #86BC25 green */
-  --background: oklch(0.99 0.002 120);
-  --foreground: oklch(0.18 0.01 240);
+  /* Figma palette (light / blue primary) — values taken from the Redesign files */
+  --background: #F8FAFF; /* light page background */
+  --foreground: #0F172A; /* dark heading/body text */
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.01 240);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.01 240);
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
 
-  --primary: oklch(0.76 0.18 130);          /* #86BC25 */
-  --primary-foreground: oklch(0.16 0.02 150);
-  --primary-soft: oklch(0.95 0.06 130);
+  --primary: #2563EB; /* Figma blue (used across Redesign files) */
+  --primary-foreground: #FFFFFF;
+  --primary-soft: #DBEAFE;
 
-  --secondary: oklch(0.96 0.005 240);
-  --secondary-foreground: oklch(0.2 0.01 240);
+  --secondary: #F1F5F9;
+  --secondary-foreground: #64748B;
 
-  --muted: oklch(0.965 0.004 240);
-  --muted-foreground: oklch(0.5 0.015 240);
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
 
-  --accent: oklch(0.95 0.05 130);
-  --accent-foreground: oklch(0.2 0.05 140);
+  --accent: #E6F0FF;
+  --accent-foreground: #1E3A8A;
 
-  --destructive: oklch(0.6 0.22 27);
-  --destructive-foreground: oklch(0.99 0 0);
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
 
-  --warning: oklch(0.82 0.16 78);
-  --warning-foreground: oklch(0.25 0.05 78);
+  --warning: #F97316;
+  --warning-foreground: #FFFFFF;
 
-  --success: oklch(0.72 0.17 145);
-  --success-foreground: oklch(0.16 0.02 150);
+  --success: #10B981;
+  --success-foreground: #FFFFFF;
 
-  --border: oklch(0.92 0.005 240);
-  --input: oklch(0.92 0.005 240);
-  --ring: oklch(0.76 0.18 130);
+  --border: #E2E8F0;
+  --input: #F1F5F9;
+  --ring: #BFDBFE;
 
-  --chart-1: oklch(0.76 0.18 130);
-  --chart-2: oklch(0.55 0.02 240);
-  --chart-3: oklch(0.82 0.16 78);
-  --chart-4: oklch(0.6 0.22 27);
-  --chart-5: oklch(0.4 0.05 240);
+  --chart-1: #2563EB;
+  --chart-2: #94A3B8;
+  --chart-3: #F97316;
+  --chart-4: #059669;
+  --chart-5: #7C3AED;
 
-  --sidebar: oklch(0.14 0.01 240);
-  --sidebar-foreground: oklch(0.92 0.005 240);
-  --sidebar-primary: oklch(0.76 0.18 130);
-  --sidebar-primary-foreground: oklch(0.14 0.02 150);
-  --sidebar-accent: oklch(0.22 0.01 240);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(0.28 0.01 240);
-  --sidebar-ring: oklch(0.76 0.18 130);
+  --sidebar: #0F172A; /* dark sidebar background to match Figma */
+  --sidebar-foreground: #CBD5E1;
+  --sidebar-primary: #2563EB;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #0B1220;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #0B1220;
+  --sidebar-ring: #2563EB;
 }
 
 .dark {
-  --background: oklch(0.14 0.01 240);
-  --foreground: oklch(0.97 0.005 240);
-  --card: oklch(0.18 0.01 240);
-  --card-foreground: oklch(0.97 0.005 240);
-  --popover: oklch(0.18 0.01 240);
-  --popover-foreground: oklch(0.97 0.005 240);
-  --primary: oklch(0.78 0.18 130);
-  --primary-foreground: oklch(0.14 0.02 150);
-  --primary-soft: oklch(0.3 0.08 135);
-  --secondary: oklch(0.24 0.01 240);
-  --secondary-foreground: oklch(0.97 0.005 240);
-  --muted: oklch(0.24 0.01 240);
-  --muted-foreground: oklch(0.7 0.01 240);
-  --accent: oklch(0.28 0.06 135);
-  --accent-foreground: oklch(0.95 0.05 130);
-  --destructive: oklch(0.65 0.22 27);
-  --destructive-foreground: oklch(0.99 0 0);
-  --warning: oklch(0.82 0.16 78);
-  --warning-foreground: oklch(0.18 0.04 78);
-  --success: oklch(0.74 0.17 145);
-  --success-foreground: oklch(0.14 0.02 150);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.78 0.18 130);
-  --chart-1: oklch(0.78 0.18 130);
-  --chart-2: oklch(0.75 0.02 240);
-  --chart-3: oklch(0.82 0.16 78);
-  --chart-4: oklch(0.7 0.22 27);
-  --chart-5: oklch(0.6 0.05 240);
-  --sidebar: oklch(0.11 0.01 240);
-  --sidebar-foreground: oklch(0.92 0.005 240);
-  --sidebar-primary: oklch(0.78 0.18 130);
-  --sidebar-primary-foreground: oklch(0.14 0.02 150);
-  --sidebar-accent: oklch(0.2 0.01 240);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.78 0.18 130);
+  --background: #0B1220; /* dark page background */
+  --foreground: #F8FAFF;
+  --card: #0F172A;
+  --card-foreground: #F8FAFF;
+  --popover: #0F172A;
+  --popover-foreground: #F8FAFF;
+  --primary: #2563EB;
+  --primary-foreground: #FFFFFF;
+  --primary-soft: #1E40AF;
+  --secondary: #0B1220;
+  --secondary-foreground: #CBD5E1;
+  --muted: #0B1220;
+  --muted-foreground: #94A3B8;
+  --accent: #1E293B;
+  --accent-foreground: #E6F0FF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --warning: #F97316;
+  --warning-foreground: #FFFFFF;
+  --success: #10B981;
+  --success-foreground: #FFFFFF;
+  --border: rgba(255,255,255,0.06);
+  --input: rgba(255,255,255,0.06);
+  --ring: #2563EB;
+  --chart-1: #2563EB;
+  --chart-2: #94A3B8;
+  --chart-3: #F97316;
+  --chart-4: #059669;
+  --chart-5: #7C3AED;
+  --sidebar: #0F172A;
+  --sidebar-foreground: #CBD5E1;
+  --sidebar-primary: #2563EB;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #0B1220;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-ring: #2563EB;
 }
 
 @layer base {
@@ -168,7 +168,7 @@
 }
 
 @utility gradient-primary {
-  background: linear-gradient(135deg, oklch(0.78 0.18 130), oklch(0.68 0.18 140));
+  background: linear-gradient(135deg,#3B82F6,#1D4ED8);
 }
 
 @utility shadow-elegant {
