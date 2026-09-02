@@ -21,6 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
+import AnimatedNumber from "@/components/animated-number";
 
 export const Route = createFileRoute("/data-upload")({
   head: () => ({ meta: [{ title: "Data Upload — Aegis Credit" }] }),
@@ -477,28 +478,30 @@ function DataUpload() {
   return (
     <div className="space-y-4">
       {/* Hero */}
-      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-6 md:flex-row md:items-start md:justify-between">
-        <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
-            <Link2 className="h-5 w-5 text-blue-600" />
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-sky-900 to-blue-800 p-6 text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10">
+              <Link2 className="h-5 w-5 text-sky-200" />
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-sky-200">Data Integration</div>
+              <h1 className="mt-2 text-lg font-semibold leading-tight">Connect a Data Source</h1>
+              <p className="mt-1 max-w-lg text-[13px] text-slate-200">
+                Bring customer, loan, collateral, and macroeconomic data into the modelling workflow. Sources are joined
+                automatically and validated before integration.
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight text-slate-900">Connect a Data Source</h1>
-            <p className="mt-1 max-w-lg text-[13px] text-slate-500">
-              Bring customer, loan, collateral, and macroeconomic data into the modelling workflow. Sources are joined
-              automatically and validated before integration.
-            </p>
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            <HeroPill tone={sourcesConnectedCount > 0 ? "emerald" : "neutral"}>
+              {sourcesConnectedCount > 0 && <CheckCircle2 className="h-3 w-3" />}
+              {sourcesConnectedCount} SOURCE{sourcesConnectedCount === 1 ? "" : "S"} CONNECTED
+            </HeroPill>
+            <HeroPill tone={integrationReport ? "emerald" : canIntegrate ? "amber" : "neutral"}>
+              {integrationReport ? "INTEGRATION COMPLETE" : canIntegrate ? "READY TO INTEGRATE" : "SOURCES INCOMPLETE"}
+            </HeroPill>
           </div>
-        </div>
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
-          <StatusBadge
-            status={sourcesConnectedCount > 0 ? "connected" : "pending"}
-            label={`${sourcesConnectedCount} SOURCE${sourcesConnectedCount === 1 ? "" : "S"} CONNECTED`}
-          />
-          <StatusBadge
-            status={canIntegrate || integrationReport ? "connected" : "pending"}
-            label={integrationReport ? "INTEGRATION COMPLETE" : canIntegrate ? "READY TO INTEGRATE" : "SOURCES INCOMPLETE"}
-          />
         </div>
       </div>
 
@@ -509,8 +512,8 @@ function DataUpload() {
           name="Customer CSV"
           subtitle="Primary join table"
           status={customerFile ? "connected" : "pending"}
-          rows={customerSourceInfo ? customerSourceInfo.rows.toLocaleString() : "—"}
-          cols={customerFile ? String(customerColumns.length) : "—"}
+          rows={customerSourceInfo ? <AnimatedNumber value={customerSourceInfo.rows} /> : "—"}
+          cols={customerFile ? <AnimatedNumber value={customerColumns.length} /> : "—"}
           detail={customerFile?.name ?? "Not connected"}
         />
         <SourceOverviewCard
@@ -518,8 +521,8 @@ function DataUpload() {
           name="SQLite Database"
           subtitle={dbTables ? `${dbTables.length} table${dbTables.length === 1 ? "" : "s"} discovered` : "Loan & collateral tables"}
           status={dbFile ? "connected" : "pending"}
-          rows={loanTableInfo ? loanTableInfo.row_count.toLocaleString() : "—"}
-          cols={loanTable || collateralTable ? String(loanColumns.length + collateralColumns.length) : "—"}
+          rows={loanTableInfo ? <AnimatedNumber value={loanTableInfo.row_count} /> : "—"}
+          cols={loanTable || collateralTable ? <AnimatedNumber value={loanColumns.length + collateralColumns.length} /> : "—"}
           detail={dbFile?.name ?? "Not connected"}
         />
         <SourceOverviewCard
@@ -528,7 +531,7 @@ function DataUpload() {
           subtitle="FRED macro indicators"
           status={macroColumns.length > 0 ? "connected" : "pending"}
           rows="—"
-          cols={macroColumns.length > 0 ? String(macroColumns.length) : "—"}
+          cols={macroColumns.length > 0 ? <AnimatedNumber value={macroColumns.length} /> : "—"}
           detail={macroDateColUsed ? `Aligned on ${macroDateColUsed}` : customerFile ? "Not fetched yet" : "Upload customer data first"}
         />
       </div>
@@ -660,18 +663,33 @@ function StatusBadge({ status, label }: { status: SourceStatus; label: string })
   };
   const s = styles[status];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide ${s.chip}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide transition-colors duration-300 ${s.chip}`}>
+      <span className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${s.dot}`} />
       {label}
     </span>
   );
 }
 
-function KPITile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+// Light-on-dark badge pill for the gradient hero banner below (StatusBadge
+// above is light-on-white, tuned for the white SourceOverviewCards instead).
+function HeroPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "emerald" | "amber" }) {
+  const toneClasses: Record<string, string> = {
+    neutral: "border-white/15 bg-white/10 text-slate-100",
+    emerald: "border-emerald-300/40 bg-emerald-400/15 text-emerald-200",
+    amber: "border-amber-300/40 bg-amber-400/15 text-amber-200",
+  };
   return (
-    <div className={`flex flex-col gap-1 rounded-xl border px-4 py-4 ${accent ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold ${toneClasses[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+function KPITile({ label, value, sub, accent }: { label: string; value: ReactNode; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`flex flex-col gap-1 rounded-xl border px-4 py-4 transition-colors duration-300 ${accent ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-white"}`}>
       <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">{label}</span>
-      <span className={`font-mono text-2xl font-semibold leading-tight ${accent ? "text-blue-700" : "text-slate-900"}`}>{value}</span>
+      <span className={`font-mono text-2xl font-semibold leading-tight transition-colors duration-300 ${accent ? "text-blue-700" : "text-slate-900"}`}>{value}</span>
       {sub && <span className="text-[11px] text-slate-400">{sub}</span>}
     </div>
   );
@@ -745,8 +763,8 @@ function SourceOverviewCard({
   name: string;
   subtitle: string;
   status: SourceStatus;
-  rows: string;
-  cols: string;
+  rows: ReactNode;
+  cols: ReactNode;
   detail: string;
 }) {
   return (
@@ -1041,18 +1059,18 @@ function IntegrationFlowDiagram({ nodes, hasWarning }: { nodes: FlowNode[]; hasW
           return (
             <div key={node.key} className="flex items-center">
               <div
-                className="flex min-w-[140px] flex-shrink-0 flex-col items-center gap-1.5 rounded-xl border px-4 py-3"
+                className="flex min-w-[140px] flex-shrink-0 flex-col items-center gap-1.5 rounded-xl border px-4 py-3 transition-colors duration-500"
                 style={{ background: c.bg, borderColor: c.border }}
               >
                 <div className="flex items-center gap-1.5">
                   {node.state === "warning" ? (
-                    <AlertTriangle className="h-3.5 w-3.5" style={{ color: c.text }} />
+                    <AlertTriangle className="h-3.5 w-3.5 transition-colors duration-500" style={{ color: c.text }} />
                   ) : node.state === "connected" ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" style={{ color: c.text }} />
+                    <CheckCircle2 className="h-3.5 w-3.5 transition-colors duration-500" style={{ color: c.text }} />
                   ) : (
                     <span className="h-2 w-2 rounded-full bg-slate-300" />
                   )}
-                  <span className="whitespace-nowrap text-xs font-semibold" style={{ color: c.text }}>{node.label}</span>
+                  <span className="whitespace-nowrap text-xs font-semibold transition-colors duration-500" style={{ color: c.text }}>{node.label}</span>
                 </div>
                 <span className="text-center text-[10.5px] leading-tight text-slate-500">{node.sub}</span>
               </div>
@@ -1102,12 +1120,16 @@ function RelationshipCard({
 
         <div className="flex flex-shrink-0 flex-col items-center gap-0.5">
           {candidate ? (
-            <div className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: accentColor }}>
+            <div className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white transition-colors duration-300" style={{ background: accentColor }}>
               {candidate.cardinality}
             </div>
           ) : null}
-          <ChevronRight className="h-4 w-4" style={{ color: accentColor }} />
-          {confidencePct !== null ? <div className="whitespace-nowrap text-[10px] text-slate-500">{confidencePct}% conf.</div> : null}
+          <ChevronRight className="h-4 w-4 transition-colors duration-300" style={{ color: accentColor }} />
+          {confidencePct !== null ? (
+            <div className="whitespace-nowrap text-[10px] text-slate-500">
+              <AnimatedNumber value={confidencePct} formatter={(n) => `${Math.round(n)}% conf.`} />
+            </div>
+          ) : null}
         </div>
 
         <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
@@ -1128,10 +1150,12 @@ function RelationshipCard({
         <div className="mb-2.5">
           <div className="mb-1 flex items-center justify-between">
             <span className="text-[10px] font-medium text-slate-500">Join confidence</span>
-            <span className="font-mono text-[11px] font-semibold" style={{ color: accentColor }}>{confidencePct}%</span>
+            <span className="font-mono text-[11px] font-semibold transition-colors duration-300" style={{ color: accentColor }}>
+              <AnimatedNumber value={confidencePct} formatter={(n) => `${Math.round(n)}%`} />
+            </span>
           </div>
           <div className="h-1 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full rounded-full" style={{ width: `${confidencePct}%`, background: accentColor }} />
+            <div className="h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${confidencePct}%`, background: accentColor }} />
           </div>
         </div>
       ) : null}
@@ -1248,12 +1272,12 @@ function DatasetReadinessPanel({
 
       <div className="p-5">
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <KPITile label="Rows" value={integrationReport.rows_after.toLocaleString()} sub="After integration" />
-          <KPITile label="Columns" value={String(integrationReport.columns_after)} sub="Across all sources" />
-          <KPITile label="Sources" value={String(totalSources)} sub="Connected inputs" />
+          <KPITile label="Rows" value={<AnimatedNumber value={integrationReport.rows_after} />} sub="After integration" />
+          <KPITile label="Columns" value={<AnimatedNumber value={integrationReport.columns_after} />} sub="Across all sources" />
+          <KPITile label="Sources" value={<AnimatedNumber value={totalSources} />} sub="Connected inputs" />
           <KPITile
             label="Join Health"
-            value={joinHealthPct !== null ? `${joinHealthPct}%` : "—"}
+            value={joinHealthPct !== null ? <AnimatedNumber value={joinHealthPct} formatter={(n) => `${Math.round(n)}%`} /> : "—"}
             sub={warnings.length ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "No warnings"}
           />
           <KPITile label="Dataset Status" value={isReady ? "READY" : "PROCESSING"} sub={isReady ? "Ready for profiling" : "Finalizing"} accent />
@@ -1332,11 +1356,11 @@ function PipelineProgress({ steps }: { steps: { label: string; sub: string; stat
           return (
             <div key={step.label} className="flex flex-1 items-center">
               <div className="flex flex-col items-center gap-1.5">
-                <div className={`h-3 w-3 rounded-full ring-2 ${c.dot}`} />
-                <div className={`whitespace-nowrap text-[10px] font-semibold tracking-wide ${c.label}`}>{step.label}</div>
-                {step.sub ? <div className={`text-[9.5px] ${c.sub}`}>{step.sub}</div> : null}
+                <div className={`h-3 w-3 rounded-full ring-2 transition-colors duration-500 ${c.dot}`} />
+                <div className={`whitespace-nowrap text-[10px] font-semibold tracking-wide transition-colors duration-500 ${c.label}`}>{step.label}</div>
+                {step.sub ? <div className={`text-[9.5px] transition-colors duration-500 ${c.sub}`}>{step.sub}</div> : null}
               </div>
-              {i < steps.length - 1 ? <div className={`mx-2 h-px flex-1 ${c.line}`} /> : null}
+              {i < steps.length - 1 ? <div className={`mx-2 h-px flex-1 transition-colors duration-500 ${c.line}`} /> : null}
             </div>
           );
         })}

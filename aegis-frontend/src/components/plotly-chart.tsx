@@ -10,52 +10,64 @@ interface PlotlyChartProps {
 
 const PlotlyChart: React.FC<PlotlyChartProps> = ({ figure, useContainerWidth = true, style, config }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const plotlyRef = useRef<any>(null);
+  const plotlyModuleRef = useRef<any>(null);
 
   useEffect(() => {
-    let Plotly: any;
     let mounted = true;
 
-    const loadPlotly = async () => {
-      const mod: any = await import("plotly.js-basic-dist");
-      if (!mounted) return;
-      // plotly.js-basic-dist is a CJS/UMD bundle (module.exports = Plotly).
-      // Dynamic import() of a CJS module surfaces its exports under
-      // `.default`; the top-level named properties (newPlot, purge, etc.)
-      // aren't reliably re-exported for a bundle this size since Plotly
-      // assigns most of its API at runtime rather than via static exports.
-      // Falling back to `mod` keeps this working if a bundler ever does
-      // flatten it.
-      Plotly = mod.default ?? mod;
-      if (!Plotly?.newPlot) {
-        console.error("PlotlyChart: Plotly.newPlot is unavailable — module shape was", mod);
+    const renderPlot = async () => {
+      if (!plotlyModuleRef.current) {
+        const mod: any = await import("plotly.js-basic-dist");
+        if (!mounted) return;
+        // plotly.js-basic-dist is a CJS/UMD bundle (module.exports = Plotly).
+        // Dynamic import() of a CJS module surfaces its exports under
+        // `.default`; the top-level named properties (newPlot, react, etc.)
+        // aren't reliably re-exported for a bundle this size since Plotly
+        // assigns most of its API at runtime rather than via static exports.
+        // Falling back to `mod` keeps this working if a bundler ever does
+        // flatten it.
+        plotlyModuleRef.current = mod.default ?? mod;
+      }
+      const Plotly = plotlyModuleRef.current;
+      if (!Plotly?.react) {
+        console.error("PlotlyChart: Plotly.react is unavailable — module shape was", Plotly);
         return;
       }
-      if (containerRef.current) {
+      if (containerRef.current && mounted) {
         try {
           // Pass the shared Plotly config so every chart uses the same ModeBar
           // and interactivity settings. Do not modify figure.data or figure.layout.
           const mergedConfig = { ...plotlyConfig, ...(config ?? {}) };
-          plotlyRef.current = Plotly.newPlot(containerRef.current, figure.data, figure.layout, mergedConfig);
+          // Plotly.react diffs against whatever is already drawn (and just
+          // calls newPlot itself the first time) instead of tearing the
+          // plot down and rebuilding it from scratch, so real data changes
+          // (a re-trained model, a different chart tab) redraw smoothly
+          // instead of flashing to a blank canvas and back.
+          await Plotly.react(containerRef.current, figure.data, figure.layout, mergedConfig);
         } catch (err) {
           console.error("PlotlyChart: failed to render figure", err);
         }
       }
     };
 
-    loadPlotly();
+    renderPlot();
 
     return () => {
       mounted = false;
-      if (plotlyRef.current && containerRef.current) {
-        plotlyRef.current.then?.((plotInstance: any) => {
-          if (plotInstance && typeof plotInstance.purge === "function") {
-            plotInstance.purge(containerRef.current!);
-          }
-        });
-      }
     };
   }, [figure, config]);
+
+  // Purge only on true unmount (not on every figure/config update above —
+  // that would defeat the point of using `react` for smooth in-place
+  // updates).
+  useEffect(() => {
+    return () => {
+      const Plotly = plotlyModuleRef.current;
+      if (Plotly?.purge && containerRef.current) {
+        Plotly.purge(containerRef.current);
+      }
+    };
+  }, []);
 
   const containerStyle: React.CSSProperties = style?.height
     ? { width: "100%", ...style }

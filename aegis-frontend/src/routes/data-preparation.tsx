@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDataset } from "@/lib/app-context";
 import { formUpload } from "@/lib/api";
 import PlotlyChart from "@/components/plotly-chart";
+import AnimatedNumber from "@/components/animated-number";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -19,7 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, CheckCircle2, ChevronDown, Download, Info,
   BarChart as BarChartIcon, Table as TableIcon, Brain, Loader2, Loader, RefreshCw, Trash2, Hash, Tag,
-  Search, TrendingUp, Workflow, PieChart, Percent, Database, Layers,
+  Search, TrendingUp, Workflow, PieChart, Percent, Database, Layers, Target, Copy,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeFeatureRemovalProposal } from "@/lib/feature-removal";
@@ -79,12 +80,21 @@ function DataPreparation() {
 // Sub-tab 1 — Data Profiling (moved from profiling.tsx, unchanged logic)
 // ═══════════════════════════════════════════════════════════════════════
 
-const CLASS_DISTRIBUTION_COLORS = ["#065f46", "#10b981", "#6ee7b7", "#a7f3d0"];
-
 // Validated 2-slot categorical pair (blue/emerald) — ties the split chart's
 // class colors to the app's primary accent instead of the unrelated lime green.
 const SPLIT_CLASS_COLORS: Record<string, string> = { "0": "#059669", "1": "#2563EB" };
 const SPLIT_CLASS_FALLBACK = "#94A3B8";
+
+// Fallback qualitative palette for target classes beyond the binary 0/1 case
+// (multiclass targets) — same tone family KpiTile uses (primary/emerald/violet/amber/rose).
+const CLASS_DISTRIBUTION_FALLBACK_COLORS = ["#2563EB", "#059669", "#7C3AED", "#D97706", "#E11D48", "#0EA5E9"];
+
+// Binary 0/1 targets reuse the exact SPLIT_CLASS_COLORS mapping so a class's
+// color stays consistent between Profiling, Preprocessing, and Training's
+// split-by-class charts; any other label falls back to the qualitative palette.
+function classSegmentColor(label: string, index: number): string {
+  return SPLIT_CLASS_COLORS[label] ?? CLASS_DISTRIBUTION_FALLBACK_COLORS[index % CLASS_DISTRIBUTION_FALLBACK_COLORS.length];
+}
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -261,28 +271,20 @@ function ProfilingTab({ onProceed }: { onProceed: () => void }) {
     return Object.entries(classDistribution).map(([name, value]) => ({ name, value: Number(value) }));
   }, [classDistribution]);
 
-  const classDistributionFigure = useMemo(() => {
-    if (!classChartData || classChartData.length === 0) return null;
-    return {
-      data: [
-        {
-          type: "pie",
-          labels: classChartData.map((entry) => entry.name),
-          values: classChartData.map((entry) => entry.value),
-          hole: 0.45,
-          marker: {
-            colors: classChartData.map((_, index) => CLASS_DISTRIBUTION_COLORS[index % CLASS_DISTRIBUTION_COLORS.length]),
-          },
-          textinfo: "percent",
-          hovertemplate: "%{label}: %{value:,}<br>%{percent}<extra></extra>",
-        },
-      ],
-      layout: {
-        margin: { t: 10, r: 10, b: 10, l: 10 },
-        legend: { orientation: "h", y: -0.15 },
-      },
-    };
+  // Donut segments for the Class Distribution card below — real counts/shares
+  // straight from classChartData, colored via classSegmentColor (binary 0/1
+  // reuses the app-wide split palette; anything else falls back to a
+  // qualitative Aegis-tone palette).
+  const donutSegments = useMemo(() => {
+    const total = classChartData.reduce((sum, entry) => sum + entry.value, 0);
+    return classChartData.map((entry, index) => ({
+      name: entry.name,
+      value: entry.value,
+      pct: total > 0 ? (entry.value / total) * 100 : 0,
+      color: classSegmentColor(entry.name, index),
+    }));
   }, [classChartData]);
+  const classTotal = useMemo(() => classChartData.reduce((sum, entry) => sum + entry.value, 0), [classChartData]);
 
   const sortedFlags = useMemo(
     () => [...agent2Flags].sort((a: any, b: any) => severityRank(a.severity) - severityRank(b.severity)),
@@ -322,342 +324,412 @@ function ProfilingTab({ onProceed }: { onProceed: () => void }) {
 
   const taskBadgeVariant = active.task_type === "binary" ? "default" : active.task_type === "multiclass" ? "secondary" : active.task_type === "regression" ? "outline" : "secondary";
 
+  const hasComplianceFlags = agent2Flags.length > 0;
+  const isImbalanced = Boolean(targetSummary?.is_imbalanced);
+  const hasLeakageRisk = leakageRiskCols.length > 0;
+  const missingTone: "amber" | "emerald" = missingPct !== null && missingPct > 3 ? "amber" : "emerald";
+  const duplicateTone: "amber" | "emerald" = duplicateRate !== null && duplicateRate > 1 ? "amber" : "emerald";
+
   return (
-    <div className="space-y-8">
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Stat
-            label="Total Rows"
-            value={rows !== null ? rows.toLocaleString() : "—"}
-            sub={active.dataset_name ?? "Number of records in the dataset"}
-          />
-          <Stat
-            label="Total Columns"
-            value={cols !== null ? String(cols) : "—"}
-            sub={numericCount !== null && categoricalCount !== null ? `${numericCount} numeric · ${categoricalCount} categorical` : "Number of fields in the dataset"}
-          />
-          <Stat
-            label="Missing Values"
-            value={missingCells !== null ? missingCells.toLocaleString() : missingPct !== null ? `${missingPct}%` : "—"}
-            sub={missingPct !== null ? `${missingPct}% of all data cells are empty` : undefined}
-          />
-          <Stat
-            label="Duplicate Rows"
-            value={duplicateRows !== null ? String(duplicateRows) : "—"}
-            sub={duplicateRate !== null ? `${duplicateRate}% of rows are exact copies of another row` : "Rows that are exact copies of another row"}
-          />
-        </div>
-
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Target Task</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{taskTypeLabel}</div>
-            </div>
-            <Badge variant={taskBadgeVariant}>{taskTypeLabel}</Badge>
-          </div>
-          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-            <div>Detected target candidates: {availableTargets.length > 0 ? availableTargets.join(", ") : "None"}</div>
-            <div>Preferred target: {candidateDefault ?? "Not detected"}</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4">
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Target variable</h2>
-              <p className="text-xs text-muted-foreground">Choose the target column to compute distribution, imbalance, and task diagnostics.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-full lg:w-64">
-                <Select value={selectedTarget ?? ""} onValueChange={(value) => setSelectedTarget(value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select target" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableColumns.map((column) => (
-                      <SelectItem key={column} value={column}>{column}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button variant="outline" size="sm" onClick={downloadDataSummary} className="shrink-0 gap-2">
-                <Download className="h-4 w-4" />
-                Download data summary
-              </Button>
-            </div>
-          </div>
-          {isLoadingTarget && (
-            <div className="mt-4 rounded-xl border border-border bg-muted p-3 text-sm text-muted-foreground">Updating target diagnostics…</div>
-          )}
-          {targetError && (
-            <div className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">{targetError}</div>
-          )}
-          {agent2Error && (
-            <div className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-              <div className="font-medium">Data compliance check could not be completed.</div>
-              <div className="mt-1 text-xs">{agent2Error}</div>
-            </div>
-          )}
-          {agent2Flags.length > 0 && (
-            <div className="mt-4 rounded-xl border border-border bg-card">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <AlertTriangle className="h-4 w-4 text-amber-600" />
-                  <span>{agent2Flags.length} compliance flag{agent2Flags.length === 1 ? "" : "s"}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {flagSeverityCounts.high > 0 && (
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${severityBadgeClasses("high")}`}>
-                      {flagSeverityCounts.high} high
-                    </span>
-                  )}
-                  {flagSeverityCounts.medium > 0 && (
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${severityBadgeClasses("medium")}`}>
-                      {flagSeverityCounts.medium} medium
-                    </span>
-                  )}
-                  {flagSeverityCounts.low > 0 && (
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${severityBadgeClasses("low")}`}>
-                      {flagSeverityCounts.low} low
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="divide-y divide-border">
-                {sortedFlags.map((flag: any, idx: number) => {
-                  const isOpen = expandedFlags.has(idx);
-                  const summary = summarizeFlag(flag.flag ?? "");
-                  const hasMore = isFlagSummarized(flag.flag ?? "") || flag.observed_value != null || flag.suggestion || flag.source || flag.principle;
-                  return (
-                    <div key={`${flag.rule_id ?? "flag"}-${idx}`} className={`border-l-4 px-4 py-2.5 ${severityClasses(flag.severity)}`}>
-                      <button
-                        type="button"
-                        onClick={() => hasMore && toggleFlagExpanded(idx)}
-                        className={`flex w-full items-start gap-2 text-left ${hasMore ? "cursor-pointer" : "cursor-default"}`}
-                      >
-                        <SeverityIcon severity={flag.severity} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                            <span>{flag.rule_id ?? "?"}</span>
-                            {flag.not_verifiable && <span className="italic normal-case">· not verifiable</span>}
-                          </div>
-                          <div className="mt-0.5 text-xs text-foreground">{summary}</div>
-                        </div>
-                        {hasMore && (
-                          <ChevronDown className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                        )}
-                      </button>
-                      {isOpen && hasMore && (
-                        <div className="mt-2 space-y-1.5 pl-5 text-xs text-muted-foreground">
-                          {isFlagSummarized(flag.flag ?? "") && <div>{flag.flag}</div>}
-                          {flag.observed_value !== undefined && flag.observed_value !== null && (
-                            <div>Observed: <code className="text-foreground">{String(flag.observed_value)}</code></div>
-                          )}
-                          {flag.suggestion && <div>💡 {flag.suggestion}</div>}
-                          {(flag.source || flag.principle) && (
-                            <div className="text-[11px] text-muted-foreground/70">
-                              {flag.source}{flag.source && flag.principle ? " — " : ""}{flag.principle}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-lg border border-border bg-background p-3">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <Info className="h-4 w-4" />
-                <span>Quality checks</span>
-              </div>
-              <div className="mt-2 text-sm text-foreground">
-                {targetSummary?.is_imbalanced ? "Target class imbalance detected." : "Target distribution appears balanced for the current profile."}
-              </div>
-              {targetSummary?.imbalance_ratio ? (
-                <div className="mt-2 text-xs text-muted-foreground">Imbalance ratio: {targetSummary.imbalance_ratio}:1</div>
-              ) : null}
-            </div>
-            <div className="rounded-lg border border-border bg-background p-3">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Leakage & dates</span>
-              </div>
-              <div className="mt-2 text-sm text-foreground">
-                {leakageRiskCols.length > 0
-                  ? `${leakageRiskCols.length} potential leakage column${leakageRiskCols.length === 1 ? "" : "s"}`
-                  : "No strong leakage signals detected."}
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">
-                {dateIntegrityEntries.length > 0
-                  ? `${dateIntegrityEntries.length} date field${dateIntegrityEntries.length === 1 ? "" : "s"} checked for future/ancient values`
-                  : "No date fields detected."}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 border-t border-border pt-4">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              <h3 className="text-sm font-semibold">Class Distribution</h3>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {selectedTarget ? (
-                <>How the selected target column (<code className="text-foreground">{selectedTarget}</code>) is split across the dataset</>
-              ) : (
-                "Select a target column above to see its value breakdown."
-              )}
+    <div className="space-y-6">
+      {/* ── Executive header ─────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-sky-900 to-blue-800 p-6 text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-sky-200">Step 1 · Data Profiling</div>
+            <h3 className="mt-2 text-2xl font-semibold">{active.dataset_name ?? "Dataset Overview"}</h3>
+            <p className="mt-2 max-w-2xl text-sm text-slate-200">
+              Profile completeness, class balance, correlations, and compliance signals before preparing this dataset for modeling.
             </p>
-
-            {classDistribution ? (
-              <div className="mt-4 grid items-center gap-6 lg:grid-cols-[1fr_1.2fr]">
-                <div className="grid gap-3">
-                  {classChartData.map((entry, index) => {
-                    const total = classChartData.reduce((sum, e) => sum + e.value, 0);
-                    const pct = total > 0 ? (entry.value / total) * 100 : 0;
-                    return (
-                      <div key={entry.name} className="rounded-lg border border-border bg-background p-4">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: CLASS_DISTRIBUTION_COLORS[index % CLASS_DISTRIBUTION_COLORS.length] }}
-                            />
-                            {selectedTarget} = {entry.name}
-                          </span>
-                          <span className="text-xl font-semibold tabular-nums text-foreground">{entry.value.toLocaleString()}</span>
-                        </div>
-                        <div className="mt-1 pl-[18px] text-xs text-muted-foreground">{pct.toFixed(1)}% of records</div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="h-72">
-                  <PlotlyChart
-                    figure={classDistributionFigure}
-                    style={{ height: "100%", minHeight: "100%" }}
-                    config={{ displayModeBar: false }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-xl border border-border bg-muted p-4 text-sm text-muted-foreground">Class distribution is not available until a valid target is selected.</div>
-            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {rows !== null && <HeroPill><AnimatedNumber value={rows} /> rows</HeroPill>}
+            {cols !== null && <HeroPill><AnimatedNumber value={cols} /> columns</HeroPill>}
+            <HeroPill tone="emerald"><CheckCircle2 className="h-3 w-3" /> {taskTypeLabel}</HeroPill>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[0.55fr_1.45fr]">
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">Duplicate and outlier signals</h2>
-          </div>
-          <div className="mt-4 space-y-3 text-sm text-muted-foreground">
-            <div className="rounded-lg border border-border bg-background p-3">
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Duplicate rate</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{duplicateRate !== null ? `${duplicateRate}%` : "—"}</div>
-              <div className="mt-1 text-xs">{duplicateRows !== null ? `${duplicateRows.toLocaleString()} duplicate row${duplicateRows === 1 ? "" : "s"}` : "No duplicate count available"}</div>
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:grid-cols-4 lg:divide-y-0">
+        <KpiTile
+          icon={Database}
+          label="Total Rows"
+          value={rows !== null ? <AnimatedNumber value={rows} /> : "—"}
+          sub={active.dataset_name ?? "Records in dataset"}
+          tone="primary"
+        />
+        <KpiTile
+          icon={Layers}
+          label="Total Columns"
+          value={cols !== null ? <AnimatedNumber value={cols} /> : "—"}
+          sub={numericCount !== null && categoricalCount !== null ? `${numericCount} numeric · ${categoricalCount} categorical` : undefined}
+          tone="violet"
+        />
+        <KpiTile
+          icon={AlertTriangle}
+          label="Missing Values"
+          value={missingCells !== null ? <AnimatedNumber value={missingCells} /> : missingPct !== null ? `${missingPct}%` : "—"}
+          sub={missingPct !== null ? `${missingPct}% of all cells are empty` : undefined}
+          tone={missingTone}
+        />
+        <KpiTile
+          icon={Copy}
+          label="Duplicate Rows"
+          value={duplicateRows !== null ? <AnimatedNumber value={duplicateRows} /> : "—"}
+          sub={duplicateRate !== null ? `${duplicateRate}% of rows` : undefined}
+          tone={duplicateTone}
+        />
+      </div>
+
+      {/* ── Target task ──────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-800 text-white">
+              <Target className="h-5 w-5" />
             </div>
-            <div className="rounded-lg border border-border bg-background p-3">
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Outlier checks</div>
-              <div className="mt-1 text-sm text-foreground">
-                {outlierEntries.length > 0 ? (
-                  <>
-                    {[...outlierEntries]
-                      .sort(([, a], [, b]) => ((b as any).outlier_fraction ?? 0) - ((a as any).outlier_fraction ?? 0))
-                      .slice(0, 4)
-                      .map(([column, info]) => (
-                        <div key={column} className="mt-2 flex items-center justify-between gap-2">
-                          <span className="truncate">{column}</span>
-                          <span className="shrink-0 font-medium tabular-nums">{(((info as any).outlier_fraction ?? 0) * 100).toFixed(1)}%</span>
-                        </div>
-                      ))}
-                    {outlierEntries.length > 4 && (
-                      <div className="mt-2 text-xs text-muted-foreground">+{outlierEntries.length - 4} more column{outlierEntries.length - 4 === 1 ? "" : "s"} with outliers</div>
-                    )}
-                  </>
-                ) : outlierEntriesAll.length > 0 ? (
-                  "No numeric columns have flagged outliers."
-                ) : (
-                  "No numeric outlier analysis available."
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-400">Target Task</div>
+              <div className="text-lg font-bold tracking-tight text-slate-900">{taskTypeLabel}</div>
+            </div>
+          </div>
+          <Badge variant={taskBadgeVariant}>{taskTypeLabel}</Badge>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500">
+          <span>Detected target candidates: <span className="font-semibold text-blue-700">{availableTargets.length > 0 ? availableTargets.join(", ") : "None"}</span></span>
+          <span>Preferred target: <span className="font-semibold text-blue-700">{candidateDefault ?? "Not detected"}</span></span>
+        </div>
+      </div>
+
+      {/* ── Target variable + compliance ─────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Target Variable</h2>
+            <p className="text-xs text-slate-500">Choose the target column to compute distribution, imbalance, and task diagnostics.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-full lg:w-64">
+              <Select value={selectedTarget ?? ""} onValueChange={(value) => setSelectedTarget(value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select target" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableColumns.map((column) => (
+                    <SelectItem key={column} value={column}>{column}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button variant="outline" size="sm" onClick={downloadDataSummary} className="shrink-0 gap-2">
+              <Download className="h-4 w-4" />
+              Download data summary
+            </Button>
+          </div>
+        </div>
+
+        {isLoadingTarget && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">Updating target diagnostics…</div>
+        )}
+        {targetError && (
+          <div className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">{targetError}</div>
+        )}
+        {agent2Error && (
+          <div className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="font-medium">Data compliance check could not be completed.</div>
+            <div className="mt-1 text-xs">{agent2Error}</div>
+          </div>
+        )}
+
+        {hasComplianceFlags ? (
+          <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 bg-amber-50/70 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span><AnimatedNumber value={agent2Flags.length} /> compliance flag{agent2Flags.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {flagSeverityCounts.high > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide transition-colors duration-300 ${severityBadgeClasses("high")}`}>
+                    <AnimatedNumber value={flagSeverityCounts.high} /> High
+                  </span>
+                )}
+                {flagSeverityCounts.medium > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide transition-colors duration-300 ${severityBadgeClasses("medium")}`}>
+                    <AnimatedNumber value={flagSeverityCounts.medium} /> Medium
+                  </span>
+                )}
+                {flagSeverityCounts.low > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide transition-colors duration-300 ${severityBadgeClasses("low")}`}>
+                    <AnimatedNumber value={flagSeverityCounts.low} /> Low
+                  </span>
                 )}
               </div>
             </div>
+            <div className="divide-y divide-amber-100 bg-white">
+              {sortedFlags.map((flag: any, idx: number) => {
+                const isOpen = expandedFlags.has(idx);
+                const summary = summarizeFlag(flag.flag ?? "");
+                const hasMore = isFlagSummarized(flag.flag ?? "") || flag.observed_value != null || flag.suggestion || flag.source || flag.principle;
+                return (
+                  <div key={`${flag.rule_id ?? "flag"}-${idx}`} className={`border-l-4 px-4 py-2.5 ${severityClasses(flag.severity)}`}>
+                    <button
+                      type="button"
+                      onClick={() => hasMore && toggleFlagExpanded(idx)}
+                      className={`flex w-full items-start gap-2 text-left ${hasMore ? "cursor-pointer" : "cursor-default"}`}
+                    >
+                      <SeverityIcon severity={flag.severity} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          <span>{flag.rule_id ?? "?"}</span>
+                          {flag.not_verifiable && <span className="italic normal-case">· not verifiable</span>}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-800">{summary}</div>
+                      </div>
+                      {hasMore && (
+                        <ChevronDown className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                      )}
+                    </button>
+                    {isOpen && hasMore && (
+                      <div className="mt-2 space-y-1.5 pl-5 text-xs text-slate-500">
+                        {isFlagSummarized(flag.flag ?? "") && <div>{flag.flag}</div>}
+                        {flag.observed_value !== undefined && flag.observed_value !== null && (
+                          <div>Observed: <code className="text-slate-700">{String(flag.observed_value)}</code></div>
+                        )}
+                        {flag.suggestion && <div>💡 {flag.suggestion}</div>}
+                        {(flag.source || flag.principle) && (
+                          <div className="text-[11px] text-slate-400">
+                            {flag.source}{flag.source && flag.principle ? " — " : ""}{flag.principle}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : !agent2Error && selectedTarget ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            No compliance flags detected for this target.
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className={cn("rounded-xl border p-4", isImbalanced ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-slate-50/60")}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <Info className="h-3.5 w-3.5" />
+                Quality Checks
+              </div>
+              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", isImbalanced ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700")}>
+                {isImbalanced ? "Warning" : "Clear"}
+              </span>
+            </div>
+            <div className="mt-2 text-sm font-semibold text-slate-900">
+              {isImbalanced ? "Target class imbalance detected." : "Target distribution appears balanced for the current profile."}
+            </div>
+            {targetSummary?.imbalance_ratio ? (
+              <div className="mt-1 text-xs text-slate-500">
+                Imbalance ratio: <AnimatedNumber value={targetSummary.imbalance_ratio} formatter={(n) => `${n}:1`} />
+              </div>
+            ) : null}
+          </div>
+          <div className={cn("rounded-xl border p-4", hasLeakageRisk ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-slate-50/60")}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Leakage &amp; Dates
+              </div>
+              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", hasLeakageRisk ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700")}>
+                {hasLeakageRisk ? "Review" : "Clear"}
+              </span>
+            </div>
+            <div className="mt-2 text-sm font-semibold text-slate-900">
+              {hasLeakageRisk
+                ? `${leakageRiskCols.length} potential leakage column${leakageRiskCols.length === 1 ? "" : "s"}`
+                : "No strong leakage signals detected."}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {dateIntegrityEntries.length > 0
+                ? `${dateIntegrityEntries.length} date field${dateIntegrityEntries.length === 1 ? "" : "s"} checked for future/ancient values`
+                : "No date fields detected."}
+            </div>
           </div>
         </div>
+      </div>
 
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">Correlation snapshot</h2>
+      {/* ── Class Distribution ───────────────────────────────────────── */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-900 px-6 py-5 text-white">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-300">Class Distribution</div>
+            <h3 className="mt-1.5 text-lg font-semibold">
+              {selectedTarget ? (
+                <>How <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-sm font-normal">{selectedTarget}</code> is split across the dataset</>
+              ) : (
+                "Select a target column to see its value breakdown"
+              )}
+            </h3>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">Pearson correlation across numeric features (up to 10 columns).</p>
-          <div className="mt-4">
-            {correlationColumns.length > 0 && correlationValues.length > 0 ? (
-              <>
-                <div className="flex justify-center overflow-x-auto">
-                  <table style={{ borderCollapse: "separate", borderSpacing: "4px", width: "100%", maxWidth: "480px" }}>
-                    <thead>
-                      <tr>
-                        <th className="p-0.5" />
-                        {correlationColumns.map((column) => (
-                          <th
-                            key={column}
-                            title={column}
-                            className="max-w-[56px] truncate p-0.5 text-[10px] font-medium text-muted-foreground"
-                          >
-                            {column.length > 7 ? `${column.slice(0, 6)}…` : column}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {correlationColumns.map((rowColumn, rowIndex) => (
-                        <tr key={rowColumn}>
-                          <th
-                            title={rowColumn}
-                            className="whitespace-nowrap p-0.5 pr-2 text-right text-[10px] font-medium text-muted-foreground"
-                          >
-                            {rowColumn.length > 10 ? `${rowColumn.slice(0, 9)}…` : rowColumn}
-                          </th>
-                          {(correlationValues[rowIndex] ?? []).map((value, colIndex) => (
-                            <td
-                              key={`${rowColumn}-${correlationColumns[colIndex]}`}
-                              title={`${rowColumn} × ${correlationColumns[colIndex]}: ${value.toFixed(2)}`}
-                              className="h-9 w-9 rounded-md text-center align-middle text-xs font-medium tabular-nums"
-                              style={correlationCellStyle(value)}
-                            >
-                              {value.toFixed(2)}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mx-auto mt-3 flex max-w-[480px] items-center gap-2 text-xs text-muted-foreground">
-                  <span>-1</span>
-                  <div
-                    className="h-2 flex-1 rounded-full"
-                    style={{ background: "linear-gradient(to right, rgba(13,148,136,0.9), rgba(148,163,184,0.15), rgba(5,150,105,0.9))" }}
-                  />
-                  <span>+1</span>
-                </div>
-              </>
-            ) : (
-              <div className="rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">No numeric correlation matrix available for this dataset.</div>
+          <div className="flex flex-wrap items-center gap-2">
+            {rows !== null && <HeroPill><AnimatedNumber value={rows} /> Records</HeroPill>}
+            {selectedTarget && <HeroPill tone="emerald"><CheckCircle2 className="h-3 w-3" /> {selectedTarget} Target</HeroPill>}
+            {isImbalanced && targetSummary?.imbalance_ratio && (
+              <HeroPill tone="amber"><AlertTriangle className="h-3 w-3" /> Imbalanced <AnimatedNumber value={targetSummary.imbalance_ratio} formatter={(n) => `${n}:1`} /></HeroPill>
             )}
           </div>
         </div>
-      </section>
 
-      <div className="flex gap-3 pt-4">
+        {classDistribution && donutSegments.length > 0 ? (
+          <div className="grid gap-8 p-6 lg:grid-cols-[auto_1fr] lg:items-center">
+            <div className="flex flex-col items-center gap-4">
+              <ClassDistributionDonut
+                segments={donutSegments}
+                total={classTotal}
+                ratioLabel={donutSegments.length === 2 && isImbalanced && targetSummary?.imbalance_ratio ? `Ratio ${targetSummary.imbalance_ratio}:1` : undefined}
+              />
+              <div className="flex max-w-[260px] flex-wrap justify-center gap-x-4 gap-y-1.5">
+                {donutSegments.map((s) => (
+                  <div key={s.name} className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm transition-colors duration-500" style={{ backgroundColor: s.color }} />
+                    <span className="text-xs font-medium text-slate-600">{selectedTarget} = {s.name}</span>
+                    <span className="text-xs text-slate-400">(<AnimatedNumber value={s.pct} formatter={(n) => `${n.toFixed(1)}%`} />)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                {donutSegments.map((s) => (
+                  <div key={s.name} className="flex items-center justify-between gap-4 px-5 py-3.5">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                        <span className="truncate">{selectedTarget} = {s.name}</span>
+                      </div>
+                      <div className="mt-1 text-2xl font-bold tabular-nums text-slate-900"><AnimatedNumber value={s.value} /></div>
+                      <div className="text-[11px] text-slate-400">records in dataset</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Share</div>
+                      <div className="text-2xl font-bold tabular-nums transition-colors duration-500" style={{ color: s.color }}>
+                        <AnimatedNumber value={s.pct} formatter={(n) => `${n.toFixed(1)}%`} />
+                      </div>
+                      <div className="text-[11px] text-slate-400">of total</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {isImbalanced && (
+                <div className="flex items-center gap-3.5 rounded-xl bg-slate-900 px-4 py-3.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300">
+                    <AlertTriangle className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-amber-300">Class Imbalance Detected</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      {targetSummary?.suggestion ?? (targetSummary?.imbalance_ratio ? `Ratio ${targetSummary.imbalance_ratio}:1 — consider resampling or class weights` : "Consider resampling or class weights.")}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 text-sm text-slate-500">Class distribution is not available until a valid target is selected.</div>
+        )}
+      </div>
+
+      {/* ── Duplicate & Outlier Signals ──────────────────────────────── */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-6 py-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <AlertTriangle className="h-4 w-4 text-violet-600" />
+            Duplicate &amp; Outlier Signals
+          </div>
+          <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wide", duplicateRows ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700")}>
+            {duplicateRows !== null ? `${duplicateRows.toLocaleString()} duplicate${duplicateRows === 1 ? "" : "s"}` : "—"}
+          </span>
+        </div>
+        <div className="grid sm:grid-cols-2">
+          <div className="border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:border-slate-100">
+            <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Duplicate Rate</div>
+            <div className={cn("mt-2 text-3xl font-bold tabular-nums transition-colors duration-500", duplicateRate !== null && duplicateRate > 1 ? "text-amber-600" : "text-emerald-600")}>
+              {duplicateRate !== null ? <AnimatedNumber value={duplicateRate} formatter={(n) => `${n}%`} /> : "—"}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {duplicateRows !== null ? `${duplicateRows.toLocaleString()} duplicate row${duplicateRows === 1 ? "" : "s"} found` : "No duplicate count available"}
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Outlier Checks</div>
+            {outlierEntries.length > 0 ? (
+              <div className="mt-3 space-y-2.5">
+                {[...outlierEntries]
+                  .sort(([, a], [, b]) => ((b as any).outlier_fraction ?? 0) - ((a as any).outlier_fraction ?? 0))
+                  .slice(0, 4)
+                  .map(([column, info]) => {
+                    const pct = ((info as any).outlier_fraction ?? 0) * 100;
+                    const barColor = pct > 10 ? "bg-red-500" : pct > 5 ? "bg-amber-500" : "bg-slate-400";
+                    return (
+                      <div key={column}>
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate font-medium text-slate-600">{column}</span>
+                          <span className="shrink-0 font-bold tabular-nums text-slate-900">
+                            <AnimatedNumber value={pct} formatter={(n) => `${n.toFixed(1)}%`} />
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-slate-100">
+                          <div className={cn("h-full rounded-full transition-all duration-500 ease-out", barColor)} style={{ width: `${Math.min(pct * 4, 100)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                {outlierEntries.length > 4 && (
+                  <div className="pt-0.5 text-[10.5px] text-slate-400">+{outlierEntries.length - 4} more column{outlierEntries.length - 4 === 1 ? "" : "s"} with outliers</div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 text-sm text-slate-500">
+                {outlierEntriesAll.length > 0 ? "No numeric columns have flagged outliers." : "No numeric outlier analysis available."}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Correlation Matrix ───────────────────────────────────────── */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-900 px-6 py-5 text-white">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-300">Correlation Snapshot</div>
+            <h3 className="mt-1.5 text-lg font-semibold">Pearson Correlation Matrix</h3>
+            <p className="mt-1 text-xs text-slate-300">Pairwise correlation across numeric features (up to 10 columns)</p>
+          </div>
+          {correlationColumns.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <HeroPill>{correlationColumns.length} Features</HeroPill>
+              <HeroPill>Pearson r</HeroPill>
+              <HeroPill>{correlationColumns.length} × {correlationColumns.length} Matrix</HeroPill>
+            </div>
+          )}
+        </div>
+        <div className="p-6">
+          {correlationColumns.length > 0 && correlationValues.length > 0 ? (
+            <CorrelationHeatmap columns={correlationColumns} values={correlationValues} />
+          ) : (
+            <div className="text-sm text-slate-500">No numeric correlation matrix available for this dataset.</div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Action bar ───────────────────────────────────────────────── */}
+      <div className="flex gap-3 pt-2">
         <Button variant="outline" onClick={() => navigate({ to: "/data-upload" })} className="gap-2">
           <ArrowLeft className="h-4 w-4" />
           Back to Data Upload
@@ -666,6 +738,255 @@ function ProfilingTab({ onProceed }: { onProceed: () => void }) {
           Proceed to Preprocessing
           <ArrowRight className="h-4 w-4" />
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Profiling dashboard visual primitives — presentation only, every value
+// rendered is passed in from real profile data computed in ProfilingTab.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Translucent badge pill used on the dark gradient banners (hero header,
+// Class Distribution, Correlation Snapshot) — matches the Figma reference's
+// dark-pill treatment for real, dynamic summary facts (record counts,
+// target name, imbalance ratio, matrix size), never static labels.
+function HeroPill({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "emerald" | "amber" }) {
+  const toneClasses: Record<string, string> = {
+    neutral: "border-white/15 bg-white/10 text-slate-100",
+    emerald: "border-emerald-300/40 bg-emerald-400/15 text-emerald-200",
+    amber: "border-amber-300/40 bg-amber-400/15 text-amber-200",
+  };
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-semibold", toneClasses[tone])}>
+      {children}
+    </span>
+  );
+}
+
+// ── SVG donut helpers — generalized to any number of segments (Figma's
+// reference version was hardcoded to exactly 2 slices; a target column can
+// have more than 2 distinct values, e.g. multiclass) ──
+function polarToXY(cx: number, cy: number, angleDeg: number, r: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function donutArcPath(cx: number, cy: number, ri: number, ro: number, s: number, e: number): string {
+  const os = polarToXY(cx, cy, s, ro);
+  const oe = polarToXY(cx, cy, e, ro);
+  const ie = polarToXY(cx, cy, e, ri);
+  const is_ = polarToXY(cx, cy, s, ri);
+  const largeArc = e - s > 180 ? 1 : 0;
+  return `M${os.x.toFixed(2)} ${os.y.toFixed(2)} A${ro} ${ro} 0 ${largeArc} 1 ${oe.x.toFixed(2)} ${oe.y.toFixed(2)} L${ie.x.toFixed(2)} ${ie.y.toFixed(2)} A${ri} ${ri} 0 ${largeArc} 0 ${is_.x.toFixed(2)} ${is_.y.toFixed(2)}Z`;
+}
+
+interface DonutSegment {
+  name: string;
+  value: number;
+  pct: number;
+  color: string;
+}
+
+function ClassDistributionDonut({ segments, total, ratioLabel }: { segments: DonutSegment[]; total: number; ratioLabel?: string }) {
+  const CX = 100;
+  const CY = 100;
+  const OR = 88;
+  const IR = 56;
+  const GAP = segments.length > 1 ? 2.5 : 0;
+
+  let cursor = GAP / 2;
+  const arcs = segments.map((seg) => {
+    const sweep = Math.max(0, (seg.pct / 100) * 360 - GAP);
+    const start = cursor;
+    const end = start + sweep;
+    cursor = end + GAP;
+    return { ...seg, start, end };
+  });
+
+  return (
+    <svg width="200" height="200" viewBox="0 0 200 200" className="drop-shadow-[0_10px_24px_rgba(30,64,175,0.18)]">
+      <circle cx={CX} cy={CY} r={OR + 4} fill="none" stroke="#dbeafe" strokeWidth="5" opacity="0.35" />
+      {segments.length === 1 ? (
+        <circle cx={CX} cy={CY} r={OR} fill={segments[0].color} style={{ transition: "fill 500ms ease-out" }} />
+      ) : (
+        arcs.map((a) => (
+          <path
+            key={a.name}
+            d={donutArcPath(CX, CY, IR, OR, a.start, a.end)}
+            fill={a.color}
+            style={{ transition: "d 500ms ease-out, fill 500ms ease-out" }}
+          />
+        ))
+      )}
+      <circle cx={CX} cy={CY} r={IR - 1} fill="#f8faff" />
+      <circle cx={CX} cy={CY} r={IR - 1} fill="none" stroke="#e0e9ff" strokeWidth="1" />
+      <text x={CX} y={ratioLabel ? CY - 10 : CY - 4} textAnchor="middle" fill="#0f172a" fontSize="24" fontWeight="800" fontFamily="inherit" letterSpacing="-0.5">
+        <AnimatedNumber value={total} render={(formatted) => <tspan>{formatted}</tspan>} />
+      </text>
+      <text x={CX} y={ratioLabel ? CY + 10 : CY + 16} textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="inherit" fontWeight="500">
+        total records
+      </text>
+      {ratioLabel && (
+        <>
+          <rect x={CX - 38} y={CY + 18} width="76" height="18" rx="5" fill="#1e3a8a" opacity="0.1" />
+          <text x={CX} y={CY + 30.5} textAnchor="middle" fill="#1e40af" fontSize="10" fontWeight="700" fontFamily="inherit">
+            {ratioLabel}
+          </text>
+        </>
+      )}
+    </svg>
+  );
+}
+
+// ── Correlation heatmap color scale — single diverging BLUE scale (Aegis
+// primary accent, matching KpiTile's "primary" tone and the hero gradients
+// used across the app) rather than an unrelated palette. ──
+function lerpRGB(a: [number, number, number], b: [number, number, number], t: number): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  return `rgb(${clamp(a[0] + (b[0] - a[0]) * t)}, ${clamp(a[1] + (b[1] - a[1]) * t)}, ${clamp(a[2] + (b[2] - a[2]) * t)})`;
+}
+const CORR_NEUTRAL: [number, number, number] = [248, 250, 252]; // slate-50
+const CORR_NEG: [number, number, number] = [100, 116, 139]; // slate-500
+const CORR_POS: [number, number, number] = [30, 64, 175]; // blue-800
+
+function correlationCellBg(v: number): string {
+  const c = Math.max(-1, Math.min(1, v));
+  if (c >= 0.999) return "#0f1e3d";
+  if (c >= 0) return lerpRGB(CORR_NEUTRAL, CORR_POS, Math.pow(c, 0.7));
+  return lerpRGB(CORR_NEUTRAL, CORR_NEG, Math.pow(-c, 0.7));
+}
+function correlationCellFg(v: number): string {
+  if (v >= 0.999) return "#93c5fd";
+  if (v >= 0.32 || v <= -0.32) return "#ffffff";
+  return "#1e3a8a";
+}
+function correlationStrengthLabel(v: number): string {
+  const a = Math.abs(v);
+  if (a < 0.05) return "negligible";
+  if (a < 0.2) return "weak";
+  if (a < 0.5) return "moderate";
+  if (a < 0.8) return "strong";
+  return "very strong";
+}
+
+function CorrelationHeatmap({ columns, values }: { columns: string[]; values: number[][] }) {
+  const [hover, setHover] = useState<{ ri: number; ci: number } | null>(null);
+  const CELL = 42;
+  const LABEL_W = 96;
+  const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+  return (
+    <div>
+      <div className="flex overflow-x-auto">
+        <div style={{ width: LABEL_W }} className="shrink-0">
+          <div style={{ height: 58 }} />
+          {columns.map((col, ri) => (
+            <div
+              key={col}
+              title={col}
+              style={{ height: CELL }}
+              className={cn(
+                "flex items-center justify-end truncate pr-2.5 text-[11px] transition-colors",
+                hover?.ri === ri ? "font-bold text-blue-700" : "font-medium text-slate-500",
+              )}
+            >
+              {truncate(col, 12)}
+            </div>
+          ))}
+        </div>
+        <div style={{ minWidth: columns.length * (CELL + 2) }} className="flex-1">
+          <div className="flex">
+            {columns.map((col, ci) => (
+              <div key={col} style={{ width: CELL, height: 58 }} className="flex shrink-0 items-end justify-center pb-2">
+                <span
+                  title={col}
+                  className={cn(
+                    "block origin-bottom whitespace-nowrap text-[10px] transition-colors",
+                    hover?.ci === ci ? "font-bold text-blue-700" : "font-medium text-slate-500",
+                  )}
+                  style={{ transform: "rotate(-40deg)" }}
+                >
+                  {truncate(col, 11)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {values.map((row, ri) => (
+            <div key={ri} className="mb-0.5 flex gap-0.5">
+              {row.map((v, ci) => {
+                const isDiag = ri === ci;
+                const isHover = hover?.ri === ri && hover?.ci === ci;
+                const isDim = hover !== null && !isHover && hover.ri !== ri && hover.ci !== ci;
+                return (
+                  <div
+                    key={ci}
+                    onMouseEnter={() => setHover({ ri, ci })}
+                    onMouseLeave={() => setHover(null)}
+                    style={{
+                      width: CELL,
+                      height: CELL,
+                      backgroundColor: correlationCellBg(v),
+                      color: correlationCellFg(v),
+                      opacity: isDim ? 0.5 : 1,
+                      transform: isHover ? "scale(1.08)" : "scale(1)",
+                      boxShadow: isHover ? "0 4px 14px rgba(37,99,235,0.3)" : "none",
+                      outline: isHover ? "2px solid #2563eb" : isDiag ? "1px solid rgba(30,58,138,0.25)" : "none",
+                      zIndex: isHover ? 2 : 1,
+                    }}
+                    className="relative flex shrink-0 items-center justify-center rounded-[3px] text-[9.5px] font-semibold tabular-nums transition-all"
+                  >
+                    {v.toFixed(2)}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 flex min-h-[34px] items-center">
+        {hover ? (
+          <div className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2">
+            <span className="text-xs font-semibold text-blue-300">{columns[hover.ri]}</span>
+            <span className="text-slate-600">×</span>
+            <span className="text-xs font-semibold text-blue-300">{columns[hover.ci]}</span>
+            <span className="mx-1 h-3.5 w-px bg-slate-700" />
+            <span className={cn("text-sm font-bold", values[hover.ri][hover.ci] >= 0 ? "text-blue-400" : "text-slate-400")}>
+              {values[hover.ri][hover.ci].toFixed(2)}
+            </span>
+            <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">
+              {correlationStrengthLabel(values[hover.ri][hover.ci])} {values[hover.ri][hover.ci] >= 0 ? "positive" : "negative"}
+            </span>
+          </div>
+        ) : (
+          <span className="text-xs italic text-slate-400">Hover a cell to inspect the feature pair</span>
+        )}
+      </div>
+
+      <div className="mt-4">
+        <div className="flex justify-between text-[10px] font-medium text-slate-400">
+          <span>-1.0</span>
+          <span>-0.5</span>
+          <span>0</span>
+          <span>+0.5</span>
+          <span>+1.0</span>
+        </div>
+        <div className="mt-1 h-2 rounded-full" style={{ background: "linear-gradient(to right, #64748b, #94a3b8, #e2e8f0, #f8fafc, #dbeafe, #93c5fd, #3b82f6, #1d4ed8, #0f1e3d)" }} />
+        <div className="mt-2.5 flex gap-5">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-slate-500" />
+            <span className="text-[10.5px] text-slate-500">Negative</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm border border-slate-200 bg-slate-50" />
+            <span className="text-[10.5px] text-slate-500">No correlation</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-blue-800" />
+            <span className="text-[10.5px] text-slate-500">Positive</span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -801,7 +1122,7 @@ function KpiTile({
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  value: string;
+  value: React.ReactNode;
   sub?: string;
   tone?: "primary" | "amber" | "emerald" | "rose" | "violet";
 }) {
@@ -816,7 +1137,7 @@ function KpiTile({
     <div className="bg-white p-4">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
-        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", toneClasses[tone])}>
+        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors duration-300", toneClasses[tone])}>
           <Icon className="h-3.5 w-3.5" />
         </span>
       </div>
@@ -826,7 +1147,7 @@ function KpiTile({
   );
 }
 
-function KpiStrip({ tiles }: { tiles: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; value: string; sub?: string; tone?: "primary" | "amber" | "emerald" | "rose" | "violet" }> }) {
+function KpiStrip({ tiles }: { tiles: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; value: React.ReactNode; sub?: string; tone?: "primary" | "amber" | "emerald" | "rose" | "violet" }> }) {
   return (
     <div
       className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0"
@@ -864,7 +1185,7 @@ function SplitProportionBar({
           segments.map((s) => (
             <div
               key={s.label}
-              className={cn("flex items-center justify-center text-[10.5px] font-bold text-white", s.c.bg)}
+              className={cn("flex items-center justify-center text-[10.5px] font-bold text-white transition-all duration-500 ease-out", s.c.bg)}
               style={{ width: `${s.pct}%` }}
               title={`${s.label}: ${s.pct?.toFixed(1)}%`}
             >
@@ -879,8 +1200,8 @@ function SplitProportionBar({
         {segments.map((s) => (
           <div key={s.label} className={cn("rounded-lg border-l-4 bg-slate-50 p-3", s.c.border)}>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-lg font-bold tabular-nums text-slate-900">{s.n !== null ? s.n.toLocaleString() : "—"}</span>
-              {s.pct !== null && <span className={cn("text-xs font-bold", s.c.text)}>{s.pct.toFixed(1)}%</span>}
+              <span className="text-lg font-bold tabular-nums text-slate-900">{s.n !== null ? <AnimatedNumber value={s.n} /> : "—"}</span>
+              {s.pct !== null && <span className={cn("text-xs font-bold", s.c.text)}><AnimatedNumber value={s.pct} formatter={(n) => `${n.toFixed(1)}%`} /></span>}
             </div>
             <div className="text-xs font-semibold text-slate-900">{s.label}</div>
             <div className="text-[11px] text-slate-500">{s.role}</div>
@@ -904,11 +1225,12 @@ function DataQualityDonut({ completeness }: { completeness: number | null }) {
           <circle
             cx="40" cy="40" r={radius} fill="none" stroke="#10b981" strokeWidth="7"
             strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+            style={{ transition: "stroke-dashoffset 600ms ease-out" }}
           />
         )}
       </svg>
       <div className="absolute text-center">
-        <div className="text-base font-bold text-slate-900">{completeness !== null ? `${completeness.toFixed(0)}%` : "—"}</div>
+        <div className="text-base font-bold text-slate-900">{completeness !== null ? <AnimatedNumber value={completeness} formatter={(n) => `${n.toFixed(0)}%`} /> : "—"}</div>
         <div className="text-[8.5px] font-semibold uppercase tracking-wide text-slate-500">Complete</div>
       </div>
     </div>
@@ -926,12 +1248,12 @@ function DataQualitySnapshot({
   leakageColumnCount: number | null;
   dateFieldCount: number | null;
 }) {
-  const rows: Array<{ label: string; display: string; status: "ok" | "warn" | "neutral" }> = [
-    { label: "Duplicate rows", display: duplicateRate !== null ? `${duplicateRate}%` : "—", status: duplicateRate === null ? "neutral" : duplicateRate > 1 ? "warn" : "ok" },
-    { label: "Outlier columns", display: outlierColumnCount !== null ? String(outlierColumnCount) : "—", status: outlierColumnCount === null ? "neutral" : outlierColumnCount > 0 ? "warn" : "ok" },
-    { label: "Target balance", display: isImbalanced === null ? "—" : isImbalanced ? `${imbalanceRatio ?? "?"}:1` : "Balanced", status: isImbalanced === null ? "neutral" : isImbalanced ? "warn" : "ok" },
-    { label: "Leakage risk columns", display: leakageColumnCount !== null ? String(leakageColumnCount) : "—", status: leakageColumnCount === null ? "neutral" : leakageColumnCount > 0 ? "warn" : "ok" },
-    { label: "Date fields checked", display: dateFieldCount !== null ? (dateFieldCount > 0 ? String(dateFieldCount) : "None") : "—", status: "neutral" },
+  const rows: Array<{ label: string; display: React.ReactNode; status: "ok" | "warn" | "neutral" }> = [
+    { label: "Duplicate rows", display: duplicateRate !== null ? <AnimatedNumber value={duplicateRate} formatter={(n) => `${n}%`} /> : "—", status: duplicateRate === null ? "neutral" : duplicateRate > 1 ? "warn" : "ok" },
+    { label: "Outlier columns", display: outlierColumnCount !== null ? <AnimatedNumber value={outlierColumnCount} /> : "—", status: outlierColumnCount === null ? "neutral" : outlierColumnCount > 0 ? "warn" : "ok" },
+    { label: "Target balance", display: isImbalanced === null ? "—" : isImbalanced ? <><AnimatedNumber value={imbalanceRatio ?? 0} />:1</> : "Balanced", status: isImbalanced === null ? "neutral" : isImbalanced ? "warn" : "ok" },
+    { label: "Leakage risk columns", display: leakageColumnCount !== null ? <AnimatedNumber value={leakageColumnCount} /> : "—", status: leakageColumnCount === null ? "neutral" : leakageColumnCount > 0 ? "warn" : "ok" },
+    { label: "Date fields checked", display: dateFieldCount !== null ? (dateFieldCount > 0 ? <AnimatedNumber value={dateFieldCount} /> : "None") : "—", status: "neutral" },
   ];
   const dotClass: Record<string, string> = { ok: "bg-emerald-500", warn: "bg-amber-500", neutral: "bg-slate-300" };
 
@@ -950,7 +1272,7 @@ function DataQualitySnapshot({
       <div className="mt-5 space-y-2.5">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center gap-2.5">
-            <span className={cn("h-2 w-2 shrink-0 rounded-full", dotClass[r.status])} />
+            <span className={cn("h-2 w-2 shrink-0 rounded-full transition-colors duration-300", dotClass[r.status])} />
             <span className="flex-1 text-xs font-medium text-slate-600">{r.label}</span>
             <span className="text-xs font-bold tabular-nums text-slate-900">{r.display}</span>
           </div>
@@ -976,8 +1298,8 @@ function PipelineFlow({ stages }: { stages: Array<{ label: string; value: number
         {stages.map((s, i) => (
           <div key={s.label} className="flex items-center">
             <div className="flex flex-col items-center gap-1.5">
-              <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 text-sm font-bold text-white", PIPELINE_CHIP_COLORS[i % PIPELINE_CHIP_COLORS.length])}>
-                {s.value !== null ? s.value : "—"}
+              <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 text-sm font-bold text-white transition-colors duration-500", PIPELINE_CHIP_COLORS[i % PIPELINE_CHIP_COLORS.length])}>
+                {s.value !== null ? <AnimatedNumber value={s.value} /> : "—"}
               </div>
               <div className="text-center">
                 <div className="whitespace-nowrap text-[10.5px] font-semibold text-slate-200">{s.label}</div>
@@ -1017,7 +1339,7 @@ function TransformationsAppliedCard({ rows }: { rows: Array<{ transform?: string
       </div>
       <div className="mt-4 flex h-3 gap-0.5 overflow-hidden rounded-full">
         {entries.map(([label, count], i) => (
-          <div key={label} className={palette[i % palette.length]} style={{ width: `${(count / total) * 100}%` }} title={`${label}: ${count}`} />
+          <div key={label} className={cn(palette[i % palette.length], "transition-all duration-500 ease-out")} style={{ width: `${(count / total) * 100}%` }} title={`${label}: ${count}`} />
         ))}
       </div>
       <div className="mt-4 space-y-2">
@@ -1025,7 +1347,7 @@ function TransformationsAppliedCard({ rows }: { rows: Array<{ transform?: string
           <div key={label} className="flex items-center gap-2.5">
             <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", palette[i % palette.length])} />
             <span className="flex-1 text-xs font-medium text-slate-600">{label}</span>
-            <span className="text-xs font-bold tabular-nums text-slate-900">{count}</span>
+            <span className="text-xs font-bold tabular-nums text-slate-900"><AnimatedNumber value={count} /></span>
           </div>
         ))}
       </div>
@@ -1189,11 +1511,13 @@ function FeatureImportanceBars({ items, metricLabel }: { items: Array<{ name: st
             <span className="w-40 shrink-0 truncate font-mono text-[11.5px] font-semibold text-slate-700" title={item.name}>{item.name}</span>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-700 to-blue-500"
+                className="h-full rounded-full bg-gradient-to-r from-blue-700 to-blue-500 transition-all duration-500 ease-out"
                 style={{ width: `${(Math.abs(item.score) / max) * 100}%` }}
               />
             </div>
-            <span className="w-12 shrink-0 text-right text-xs font-bold tabular-nums text-slate-900">{item.score.toFixed(2)}</span>
+            <span className="w-12 shrink-0 text-right text-xs font-bold tabular-nums text-slate-900">
+              <AnimatedNumber value={item.score} formatter={(n) => n.toFixed(2)} />
+            </span>
           </div>
         ))}
       </div>
@@ -1559,11 +1883,11 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
 
       <KpiStrip
         tiles={[
-          { icon: Database, label: "Total Records", value: totalRows !== null ? totalRows.toLocaleString() : "—", sub: "Rows across train/val/test", tone: "primary" },
-          { icon: Percent, label: "Missing Values", value: missingPctValue !== null ? `${missingPctValue}%` : "—", sub: profile?.missing_cells != null ? `${Number(profile.missing_cells).toLocaleString()} cells` : undefined, tone: "amber" },
-          { icon: Trash2, label: "Duplicate Rows", value: profile?.duplicate_rows != null ? String(profile.duplicate_rows) : "—", sub: duplicateRateValue !== null ? `${duplicateRateValue}% of rows` : undefined, tone: "rose" },
-          { icon: AlertTriangle, label: "Columns Flagged", value: String(missingProposalEntries.length), sub: "Need a missing-value decision", tone: "amber" },
-          { icon: BarChartIcon, label: "Skew Transforms", value: String(transformDecisions.length), sub: "Recommended on numeric columns", tone: "violet" },
+          { icon: Database, label: "Total Records", value: totalRows !== null ? <AnimatedNumber value={totalRows} /> : "—", sub: "Rows across train/val/test", tone: "primary" },
+          { icon: Percent, label: "Missing Values", value: missingPctValue !== null ? <AnimatedNumber value={missingPctValue} formatter={(n) => `${n}%`} /> : "—", sub: profile?.missing_cells != null ? `${Number(profile.missing_cells).toLocaleString()} cells` : undefined, tone: "amber" },
+          { icon: Trash2, label: "Duplicate Rows", value: profile?.duplicate_rows != null ? <AnimatedNumber value={Number(profile.duplicate_rows)} /> : "—", sub: duplicateRateValue !== null ? `${duplicateRateValue}% of rows` : undefined, tone: "rose" },
+          { icon: AlertTriangle, label: "Columns Flagged", value: <AnimatedNumber value={missingProposalEntries.length} />, sub: "Need a missing-value decision", tone: "amber" },
+          { icon: BarChartIcon, label: "Skew Transforms", value: <AnimatedNumber value={transformDecisions.length} />, sub: "Recommended on numeric columns", tone: "violet" },
         ]}
       />
 
@@ -1724,7 +2048,7 @@ function PreprocessingSection({ onBackToProfiling }: { onBackToProfiling: () => 
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-medium text-sm text-slate-900">{col}</span>
                               <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
-                                {(missingPct * 100).toFixed(1)}% missing
+                                <AnimatedNumber value={missingPct * 100} formatter={(n) => `${n.toFixed(1)}% missing`} />
                               </span>
                               {isReviewFlag && (
                                 <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">
@@ -2350,12 +2674,12 @@ function FeaturesSection() {
       {preprocessingResult && (
         <KpiStrip
           tiles={[
-            { icon: TableIcon, label: "Feature Count After Cleanup", value: preprocessSummary.feature_count != null ? String(preprocessSummary.feature_count) : "—", sub: "After removing sparse/ID columns", tone: "primary" },
-            { icon: Trash2, label: "Duplicate Rows Removed", value: String(preprocessSummary.duplicates_removed ?? 0), sub: "Exact-copy rows dropped pre-split", tone: "rose" },
-            { icon: Hash, label: "Numeric Columns", value: preprocessSummary.numeric_feature_count != null ? String(preprocessSummary.numeric_feature_count) : "—", sub: "Continuous fields for modeling", tone: "emerald" },
-            { icon: Tag, label: "Categorical Columns", value: preprocessSummary.categorical_feature_count != null ? String(preprocessSummary.categorical_feature_count) : "—", sub: "Non-numeric, need encoding", tone: "violet" },
+            { icon: TableIcon, label: "Feature Count After Cleanup", value: preprocessSummary.feature_count != null ? <AnimatedNumber value={preprocessSummary.feature_count} /> : "—", sub: "After removing sparse/ID columns", tone: "primary" },
+            { icon: Trash2, label: "Duplicate Rows Removed", value: <AnimatedNumber value={preprocessSummary.duplicates_removed ?? 0} />, sub: "Exact-copy rows dropped pre-split", tone: "rose" },
+            { icon: Hash, label: "Numeric Columns", value: preprocessSummary.numeric_feature_count != null ? <AnimatedNumber value={preprocessSummary.numeric_feature_count} /> : "—", sub: "Continuous fields for modeling", tone: "emerald" },
+            { icon: Tag, label: "Categorical Columns", value: preprocessSummary.categorical_feature_count != null ? <AnimatedNumber value={preprocessSummary.categorical_feature_count} /> : "—", sub: "Non-numeric, need encoding", tone: "violet" },
             ...(preprocessSummary.other_feature_count > 0
-              ? [{ icon: TableIcon, label: "Other Columns", value: String(preprocessSummary.other_feature_count), sub: "Boolean/datetime, engineered separately", tone: "primary" as const }]
+              ? [{ icon: TableIcon, label: "Other Columns", value: <AnimatedNumber value={preprocessSummary.other_feature_count} />, sub: "Boolean/datetime, engineered separately", tone: "primary" as const }]
               : []),
           ]}
         />
@@ -2364,10 +2688,10 @@ function FeaturesSection() {
       {(originalFeatures !== null || finalFeatures !== null || addedFeatures.length > 0 || removedFeatures.length > 0) && (
         <KpiStrip
           tiles={[
-            ...(originalFeatures !== null ? [{ icon: Layers, label: "Original Features", value: String(originalFeatures), sub: "Before feature engineering", tone: "primary" as const }] : []),
-            ...(finalFeatures !== null ? [{ icon: Layers, label: "Final Features", value: String(finalFeatures), sub: "After feature engineering", tone: "emerald" as const }] : []),
-            ...(addedFeatures.length > 0 ? [{ icon: TrendingUp, label: "Features Added", value: String(addedFeatures.length), sub: "New engineered columns", tone: "violet" as const }] : []),
-            ...(removedFeatures.length > 0 ? [{ icon: Trash2, label: "Features Removed", value: String(removedFeatures.length), sub: "Dropped during engineering", tone: "rose" as const }] : []),
+            ...(originalFeatures !== null ? [{ icon: Layers, label: "Original Features", value: <AnimatedNumber value={originalFeatures} />, sub: "Before feature engineering", tone: "primary" as const }] : []),
+            ...(finalFeatures !== null ? [{ icon: Layers, label: "Final Features", value: <AnimatedNumber value={finalFeatures} />, sub: "After feature engineering", tone: "emerald" as const }] : []),
+            ...(addedFeatures.length > 0 ? [{ icon: TrendingUp, label: "Features Added", value: <AnimatedNumber value={addedFeatures.length} />, sub: "New engineered columns", tone: "violet" as const }] : []),
+            ...(removedFeatures.length > 0 ? [{ icon: Trash2, label: "Features Removed", value: <AnimatedNumber value={removedFeatures.length} />, sub: "Dropped during engineering", tone: "rose" as const }] : []),
           ]}
         />
       )}
