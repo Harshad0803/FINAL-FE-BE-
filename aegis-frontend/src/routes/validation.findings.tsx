@@ -1,12 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import React from "react";
-import { PageHeader } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card as UiCard } from "@/components/ui/card";
-import { ArrowRight, AlertTriangle, RefreshCw, Printer, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowRight, AlertTriangle, RefreshCw, Printer, ChevronDown, ChevronRight, FileText, Gauge, Download, Users } from "lucide-react";
 import { ApiError, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/findings")({
   head: () => ({ meta: [{ title: "Stage 7 — Findings & Final Report — Aegis Credit" }] }),
@@ -340,46 +338,51 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
   const [signOff, setSignOff] = React.useState({ validator: "", modelOwner: "", committee: "" });
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Stage 7 — Findings & Final Validation Report"
+    <div className="space-y-6">
+      <StageHero
+        eyebrow="STAGE 7 · MODEL VALIDATION"
+        title="Findings & Final Validation Report"
         description="SS1/23 P4.1/P5 · SS11/13 §13 — consolidated findings, verdict, and sign-off for the Model Risk Committee."
+        chips={
+          <>
+            <HeroChip>Final verdict</HeroChip>
+            <HeroChip tone={data ? (data.verdict === "APPROVED" ? "success" : data.verdict === "REJECTED" ? "warning" : "neutral") : "neutral"}>
+              {data ? data.verdict : "Findings register"}
+            </HeroChip>
+          </>
+        }
       />
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Final verdict</Badge>
-        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Findings register</Badge>
-      </div>
 
-      <UiCard className="p-4 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
         {datasetReady ? (
-          <>Using the shared dataset from Stage 1 / Stage 2: <span className="font-semibold text-foreground">{datasetName}</span>.</>
+          <>Using the shared dataset from Stage 1 / Stage 2: <span className="font-semibold text-slate-900">{datasetName}</span>.</>
         ) : (
           <>No active dataset is available in shared state yet. Complete Stage 1 Intake and Stage 2 Data Validation first.</>
         )}
-      </UiCard>
+      </div>
 
       {loading ? (
-        <div className="rounded-xl border border-border bg-card p-6 text-center">Compiling Stage 7 findings...</div>
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center text-sm text-slate-500">Compiling Stage 7 findings...</div>
       ) : error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-6">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-destructive">
+              <div className="text-sm font-semibold text-red-700">
                 {errorKind === "network"
                   ? "Backend unreachable — this looks like a transient network issue"
                   : "Error loading Stage 7 findings"}
               </div>
-              <p className="mt-1 text-sm text-foreground/80">
+              <p className="mt-1 text-sm text-slate-700">
                 {errorKind === "network"
                   ? "The findings request never reached the server (connection refused, CORS, or the backend is still starting up). It's likely temporary — try again in a moment."
                   : error}
               </p>
-              {errorKind === "network" ? <p className="mt-1 text-xs text-muted-foreground">{error}</p> : null}
+              {errorKind === "network" ? <p className="mt-1 text-xs text-slate-500">{error}</p> : null}
               <button
                 type="button"
                 onClick={() => setRetryToken((t) => t + 1)}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:border-primary/40"
+                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-blue-300"
               >
                 <RefreshCw className="h-3.5 w-3.5" /> Retry
               </button>
@@ -392,77 +395,76 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
             <button
               type="button"
               onClick={downloadFullReportPdf}
-              className="no-print inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+              className="no-print inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-slate-900 via-blue-800 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(37,99,235,0.35)] transition-opacity hover:opacity-90"
             >
               <Printer className="h-4 w-4" />
               Download Full Report (PDF)
             </button>
           </div>
 
-          <div id="full-report-content" className="space-y-8">
+          <div id="full-report-content" className="space-y-6">
           {/* Model identity */}
-          <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <h3 className="text-sm font-semibold">1. Model Identity</h3>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-              <div><strong>Model:</strong> {ij.model_name ?? "N/A"}</div>
-              <div><strong>Type:</strong> {ij.model_type ?? "N/A"}</div>
-              <div><strong>Risk tier:</strong> {data.model_tier}</div>
-              <div><strong>Validator:</strong> {signOff.validator || "—"}</div>
-              <div><strong>Validation date:</strong> {todayLabel()}</div>
+          <VCard icon={FileText} title="1. Model Identity">
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              <div><strong className="text-slate-900">Model:</strong> <span className="text-slate-600">{ij.model_name ?? "N/A"}</span></div>
+              <div><strong className="text-slate-900">Type:</strong> <span className="text-slate-600">{ij.model_type ?? "N/A"}</span></div>
+              <div><strong className="text-slate-900">Risk tier:</strong> <span className="text-slate-600">{data.model_tier}</span></div>
+              <div><strong className="text-slate-900">Validator:</strong> <span className="text-slate-600">{signOff.validator || "—"}</span></div>
+              <div><strong className="text-slate-900">Validation date:</strong> <span className="text-slate-600">{todayLabel()}</span></div>
             </div>
-          </section>
+          </VCard>
 
           {/* Overall verdict banner */}
-          <UiCard className={`border-2 ${verdictStyle.border} ${verdictStyle.bg} p-6 shadow-elegant`}>
-            <h3 className="text-sm font-semibold">2. Overall Verdict</h3>
+          <div className={`rounded-2xl border-2 ${verdictStyle.border} ${verdictStyle.bg} p-6 shadow-sm`}>
+            <h3 className="text-sm font-semibold text-slate-900">2. Overall Verdict</h3>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <div className={`text-2xl font-extrabold ${verdictStyle.text}`}>
                 {verdictStyle.icon} {data.verdict}
               </div>
               <div className="text-right text-sm">
-                <span className="font-bold text-red-600 dark:text-red-400">HIGH: {data.high_count}</span>{" "}
-                <span className="font-bold text-amber-600 dark:text-amber-400">MEDIUM: {data.medium_count}</span>{" "}
-                <span className="text-muted-foreground">Total findings: {data.total_count}</span>
+                <span className="font-bold text-red-600">HIGH: {data.high_count}</span>{" "}
+                <span className="font-bold text-amber-600">MEDIUM: {data.medium_count}</span>{" "}
+                <span className="text-slate-500">Total findings: {data.total_count}</span>
               </div>
             </div>
-            <p className="mt-3 text-sm text-foreground/80">{data.verdict_desc}</p>
-            <p className="mt-2 text-sm font-medium text-foreground">{verdictReasoning(data)}</p>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-3 text-sm text-slate-700">{data.verdict_desc}</p>
+            <p className="mt-2 text-sm font-medium text-slate-900">{verdictReasoning(data)}</p>
+            <p className="mt-2 text-xs text-slate-500">
               Model: {ij.model_name ?? "N/A"} · Type: {ij.model_type ?? "N/A"} · Tier: {data.model_tier} · Date: {todayLabel()}
             </p>
-          </UiCard>
+          </div>
 
           {/* Findings tracker */}
           <section className="space-y-4">
             <div>
-              <h3 className="text-sm font-semibold">3. Findings Summary</h3>
-              <p className="text-xs text-muted-foreground">
+              <h3 className="text-sm font-semibold text-slate-900">3. Findings Summary</h3>
+              <p className="text-xs text-slate-500">
                 Auto-compiled from Stages 1–7. All HIGH findings must be resolved before model deployment.
               </p>
             </div>
 
             {findings.length === 0 ? (
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
                 ✅ No findings raised across all validation stages — model is fully compliant.
               </div>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-xl border border-border bg-card p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Findings</div>
-                    <div className="mt-2 text-2xl font-semibold">{data.total_count}</div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Findings</div>
+                    <div className="mt-2 text-2xl font-semibold text-slate-900">{data.total_count}</div>
                   </div>
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">🔴 HIGH</div>
-                    <div className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-300">{data.high_count}</div>
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">🔴 HIGH</div>
+                    <div className="mt-2 text-2xl font-semibold text-red-600">{data.high_count}</div>
                   </div>
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">🟡 MEDIUM</div>
-                    <div className="mt-2 text-2xl font-semibold text-amber-600 dark:text-amber-300">{data.medium_count}</div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">🟡 MEDIUM</div>
+                    <div className="mt-2 text-2xl font-semibold text-amber-600">{data.medium_count}</div>
                   </div>
-                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">🟢 LOW</div>
-                    <div className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-300">{data.low_count}</div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">🟢 LOW</div>
+                    <div className="mt-2 text-2xl font-semibold text-emerald-600">{data.low_count}</div>
                   </div>
                 </div>
 
@@ -470,14 +472,14 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                   {groupedFindings.map(({ stage, items }) => (
                     <div key={stage}>
                       <div className="mb-2 flex items-center gap-2">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{stage}</h4>
-                        <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{stage}</h4>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500">
                           {items.length} finding{items.length === 1 ? "" : "s"}
                         </span>
                       </div>
-                      <div className="overflow-hidden rounded-lg border border-border">
+                      <div className="overflow-hidden rounded-xl border border-slate-200">
                         <table className="w-full text-sm">
-                          <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                             <tr>
                               <th className="w-10 px-3 py-2 text-left">S.No</th>
                               <th className="px-3 py-2 text-left">Finding</th>
@@ -485,20 +487,20 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                               <th className="px-3 py-2 text-left">Status</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-border">
+                          <tbody className="divide-y divide-slate-100">
                             {items.map((f) => {
                               const s = severityStyle(f.severity);
                               const expanded = Boolean(expandedFindings[f._sno]);
                               return (
                                 <React.Fragment key={f._sno}>
                                   <tr
-                                    className="cursor-pointer hover:bg-background/60"
+                                    className="cursor-pointer hover:bg-slate-50"
                                     onClick={() => toggleFinding(f._sno)}
                                   >
-                                    <td className="px-3 py-2 align-top text-muted-foreground">{f._sno}</td>
+                                    <td className="px-3 py-2 align-top text-slate-400">{f._sno}</td>
                                     <td className="px-3 py-2 align-top">
-                                      <div className="flex items-center gap-1.5 font-medium text-foreground">
-                                        {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                                      <div className="flex items-center gap-1.5 font-medium text-slate-900">
+                                        {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-blue-600" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-blue-600" />}
                                         {f.check}
                                       </div>
                                     </td>
@@ -507,15 +509,15 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                                         {f.severity}
                                       </span>
                                     </td>
-                                    <td className="px-3 py-2 align-top text-xs font-bold text-muted-foreground">{f.status}</td>
+                                    <td className="px-3 py-2 align-top text-xs font-bold text-slate-500">{f.status}</td>
                                   </tr>
                                   {expanded && (
                                     <tr className={`${s.bg}`}>
                                       <td className="px-3 py-3" />
                                       <td colSpan={3} className="px-3 py-3">
-                                        <div className="text-sm text-foreground">📌 {f.finding}</div>
-                                        <div className="mt-2 text-sm text-muted-foreground">💡 {f.recommendation}</div>
-                                        <div className="mt-1 text-xs text-muted-foreground">📋 {f.regulation}</div>
+                                        <div className="text-sm text-slate-800">📌 {f.finding}</div>
+                                        <div className="mt-2 text-sm text-slate-500">💡 {f.recommendation}</div>
+                                        <div className="mt-1 text-xs text-slate-500">📋 {f.regulation}</div>
                                       </td>
                                     </tr>
                                   )}
@@ -534,18 +536,18 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                 <div className="print-only space-y-6">
                   {groupedFindings.map(({ stage, items }) => (
                     <div key={`print-${stage}`}>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{stage}</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{stage}</h4>
                       <div className="mt-2 space-y-2">
                         {items.map((f) => {
                           const s = severityStyle(f.severity);
                           return (
                             <div key={`print-${f._sno}`} className={`rounded-r-lg border-l-4 ${s.border} ${s.bg} p-3`}>
-                              <div className="text-sm font-semibold text-foreground">
+                              <div className="text-sm font-semibold text-slate-900">
                                 {f._sno}. {f.check} — <span className="uppercase">{f.severity}</span> ({f.status})
                               </div>
-                              <div className="mt-1 text-sm text-foreground">📌 {f.finding}</div>
-                              <div className="mt-1 text-sm text-muted-foreground">💡 {f.recommendation}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">📋 {f.regulation}</div>
+                              <div className="mt-1 text-sm text-slate-800">📌 {f.finding}</div>
+                              <div className="mt-1 text-sm text-slate-500">💡 {f.recommendation}</div>
+                              <div className="mt-1 text-xs text-slate-500">📋 {f.regulation}</div>
                             </div>
                           );
                         })}
@@ -557,11 +559,11 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                 {/* Remediation log — an internal working tool for tracking
                     owners/deadlines, not part of the formal PDF report. */}
                 <div className="no-print">
-                  <h3 className="text-sm font-semibold">📝 Remediation Action Log</h3>
-                  <p className="text-xs text-muted-foreground">Add owners and deadlines for each finding before sign-off.</p>
-                  <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+                  <h3 className="text-sm font-semibold text-slate-900">📝 Remediation Action Log</h3>
+                  <p className="text-xs text-slate-500">Add owners and deadlines for each finding before sign-off.</p>
+                  <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
                     <table className="w-full text-sm">
-                      <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                         <tr>
                           <th className="px-3 py-2 text-left">#</th>
                           <th className="px-3 py-2 text-left">Finding</th>
@@ -571,19 +573,19 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                           <th className="px-3 py-2 text-left">Status</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border">
+                      <tbody className="divide-y divide-slate-100">
                         {remediation.map((r, i) => (
                           <tr key={r.finding + i}>
-                            <td className="px-3 py-2 align-top text-muted-foreground">{i + 1}</td>
+                            <td className="px-3 py-2 align-top text-slate-400">{i + 1}</td>
                             <td className="px-3 py-2 align-top">
-                              <div className="font-medium">{r.finding}</div>
-                              <div className="text-xs text-muted-foreground">{r.detail}</div>
+                              <div className="font-medium text-slate-900">{r.finding}</div>
+                              <div className="text-xs text-slate-500">{r.detail}</div>
                             </td>
                             <td className="px-3 py-2 align-top">
                               <select
                                 value={r.severity}
                                 onChange={(e) => updateRemediation(i, { severity: e.target.value })}
-                                className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
                               >
                                 <option>HIGH</option>
                                 <option>MEDIUM</option>
@@ -595,7 +597,7 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                                 value={r.owner}
                                 onChange={(e) => updateRemediation(i, { owner: e.target.value })}
                                 placeholder="Owner"
-                                className="w-32 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                                className="w-32 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
                               />
                             </td>
                             <td className="px-3 py-2 align-top">
@@ -603,14 +605,14 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                                 value={r.targetDate}
                                 onChange={(e) => updateRemediation(i, { targetDate: e.target.value })}
                                 placeholder="e.g. 31 Aug 2026"
-                                className="w-32 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                                className="w-32 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
                               />
                             </td>
                             <td className="px-3 py-2 align-top">
                               <select
                                 value={r.status}
                                 onChange={(e) => updateRemediation(i, { status: e.target.value })}
-                                className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
                               >
                                 <option>Open</option>
                                 <option>In Progress</option>
@@ -629,12 +631,10 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
           </section>
 
           {/* Performance metrics vs regulatory thresholds */}
-          <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <h3 className="text-sm font-semibold">4. Performance Metrics vs Regulatory Thresholds</h3>
-            <p className="mt-1 text-xs text-muted-foreground">Replicated (Stage 3/4) metrics evaluated against the minimum required by regulation.</p>
-            <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+          <VCard icon={Gauge} title="4. Performance Metrics vs Regulatory Thresholds" sub="Replicated (Stage 3/4) metrics evaluated against the minimum required by regulation.">
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm">
-                <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                   <tr>
                     <th className="px-3 py-2 text-left">Metric</th>
                     <th className="px-3 py-2 text-left">Value</th>
@@ -643,20 +643,20 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                     <th className="px-3 py-2 text-left">Result</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-slate-100">
                   {metricRows.map((row) => (
                     <tr key={row.metric}>
-                      <td className="px-3 py-2 align-top font-medium">{row.metric}</td>
-                      <td className="px-3 py-2 align-top">{row.value !== null ? row.value.toFixed(4) : "N/A"}</td>
-                      <td className="px-3 py-2 align-top text-muted-foreground">{row.op} {row.threshold}</td>
-                      <td className="px-3 py-2 align-top text-muted-foreground">{row.regulation}</td>
+                      <td className="px-3 py-2 align-top font-medium text-slate-900">{row.metric}</td>
+                      <td className="px-3 py-2 align-top text-slate-700">{row.value !== null ? row.value.toFixed(4) : "N/A"}</td>
+                      <td className="px-3 py-2 align-top text-slate-500">{row.op} {row.threshold}</td>
+                      <td className="px-3 py-2 align-top text-slate-500">{row.regulation}</td>
                       <td className="px-3 py-2 align-top">
                         {row.pass === null ? (
-                          <span className="text-muted-foreground">N/A</span>
+                          <span className="text-slate-400">N/A</span>
                         ) : row.pass ? (
-                          <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-950">Pass</span>
+                          <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">Pass</span>
                         ) : (
-                          <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold uppercase text-red-950">Fail</span>
+                          <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">Fail</span>
                         )}
                       </td>
                     </tr>
@@ -664,41 +664,41 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                 </tbody>
               </table>
             </div>
-          </section>
+          </VCard>
 
           {/* Monitoring & revalidation */}
           <section>
-            <h3 className="text-sm font-semibold">5. Monitoring & Revalidation Recommendations</h3>
+            <h3 className="text-sm font-semibold text-slate-900">5. Monitoring &amp; Revalidation Recommendations</h3>
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="text-xs font-bold text-primary">MONITORING FREQUENCY</div>
-                <div className="mt-1 text-xl font-bold">{data.monitoring_frequency}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Based on {data.model_tier}</div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-bold text-blue-600">MONITORING FREQUENCY</div>
+                <div className="mt-1 text-xl font-bold text-slate-900">{data.monitoring_frequency}</div>
+                <div className="mt-1 text-xs text-slate-500">Based on {data.model_tier}</div>
               </div>
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="text-xs font-bold text-primary">REVALIDATION TRIGGER</div>
-                <div className="mt-1 text-base font-bold">{data.revalidation_trigger}</div>
-                <div className="mt-1 text-xs text-muted-foreground">SS1/23 P4.4</div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-xs font-bold text-blue-600">REVALIDATION TRIGGER</div>
+                <div className="mt-1 text-base font-bold text-slate-900">{data.revalidation_trigger}</div>
+                <div className="mt-1 text-xs text-slate-500">SS1/23 P4.4</div>
               </div>
             </div>
           </section>
 
           {/* Executive summary */}
           <section>
-            <h3 className="text-sm font-semibold">6. Executive Summary</h3>
-            <p className="text-xs text-muted-foreground no-print">Auto-generated from validation findings. Edit before final sign-off.</p>
+            <h3 className="text-sm font-semibold text-slate-900">6. Executive Summary</h3>
+            <p className="text-xs text-slate-500 no-print">Auto-generated from validation findings. Edit before final sign-off.</p>
             <textarea
               value={execSummary}
               onChange={(e) => setExecSummary(e.target.value)}
               rows={14}
-              className="no-print mt-3 w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed"
+              className="no-print mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-slate-800"
             />
             <pre className="print-only mt-3 whitespace-pre-wrap font-mono text-xs leading-relaxed">{execSummary}</pre>
           </section>
 
           {/* Downloads */}
           <section className="no-print">
-            <h3 className="text-sm font-semibold">📥 Download Evidence Pack</h3>
+            <h3 className="text-sm font-semibold text-slate-900">📥 Download Evidence Pack</h3>
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
               <button
                 type="button"
@@ -709,9 +709,10 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                     findings,
                   )
                 }
-                className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                📋 Download Findings Report (CSV)
+                <Download className="h-4 w-4" />
+                Download Findings Report (CSV)
               </button>
               <button
                 type="button"
@@ -739,16 +740,16 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                     { Section: "Executive Summary", Value: execSummary },
                   ])
                 }
-                className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:border-primary/40"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-blue-300"
               >
-                📄 Download Full Validation Report (CSV)
+                <Download className="h-4 w-4" />
+                Download Full Validation Report (CSV)
               </button>
             </div>
           </section>
 
           {/* Sign-off */}
-          <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <h3 className="text-sm font-semibold">7. Sign-off</h3>
+          <VCard icon={Users} title="7. Sign-off">
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
               {(
                 [
@@ -757,22 +758,22 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
                   ["Committee", "committee", "Model Risk Committee"],
                 ] as const
               ).map(([role, key, sub]) => (
-                <div key={role} className="rounded-lg border border-border bg-background p-4">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{role}</div>
+                <div key={role} className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{role}</div>
                   <input
                     value={signOff[key]}
                     onChange={(e) => setSignOff((prev) => ({ ...prev, [key]: e.target.value }))}
                     placeholder="Name / status"
-                    className="no-print mt-1 w-full rounded-md border border-border bg-card px-2 py-1 text-sm font-semibold"
+                    className="no-print mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-900"
                   />
-                  <div className="print-only mt-1 border-b border-foreground/40 pb-1 text-sm font-semibold">
+                  <div className="print-only mt-1 border-b border-slate-400 pb-1 text-sm font-semibold">
                     {signOff[key] || " "}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">{sub}</div>
+                  <div className="mt-1 text-xs text-slate-500">{sub}</div>
                 </div>
               ))}
             </div>
-          </section>
+          </VCard>
           </div>
         </>
       ) : null}
@@ -780,13 +781,13 @@ Revalidation trigger: ${data.revalidation_trigger}`.trim();
       <div className="flex items-center justify-between">
         <Link
           to="/validation/regulatory"
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold hover:border-primary/40"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-blue-300"
         >
           ← Back to Stage 6: Explainability and Fairness
         </Link>
         <Link
           to="/validation"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
         >
           Finish
           <ArrowRight className="h-4 w-4" />

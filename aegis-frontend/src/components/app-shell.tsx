@@ -169,15 +169,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-border/70 bg-background/80 px-4 backdrop-blur-md md:px-8">
+        <header
+          className={cn(
+            "sticky top-0 z-20 flex items-center gap-4 px-4 backdrop-blur-md md:px-8",
+            isLanding ? "h-[60px] border-b border-sidebar-border bg-sidebar" : "h-16 border-b border-border/70 bg-background/80",
+          )}
+        >
           {isLanding ? (
             <Link to="/" className="flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-primary shadow-elegant">
                 <ShieldCheck className="h-5 w-5 text-primary-foreground" />
               </div>
               <div className="leading-tight">
-                <div className="text-sm font-semibold tracking-tight">Credit Risk POC</div>
-                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">AI Model Platform</div>
+                <div className="text-sm font-semibold tracking-tight text-white">Credit Risk POC</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/60">AI Model Platform</div>
               </div>
             </Link>
           ) : (
@@ -197,7 +202,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {isLanding && (
                 <Link
                   to="/development"
-                  className="hidden items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:border-primary/40 sm:inline-flex"
+                  className="hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-sidebar-foreground/70 hover:bg-white/5 hover:text-white sm:inline-flex"
                 >
                   Develop
                 </Link>
@@ -205,43 +210,66 @@ export function AppShell({ children }: { children: ReactNode }) {
               {isLanding && (
                 <Link
                   to="/validation"
-                  className="hidden items-center gap-1.5 rounded-lg gradient-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-elegant sm:inline-flex"
+                  className="hidden items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground sm:inline-flex"
                 >
                   Validate
                 </Link>
               )}
+              {isLanding && <div className="hidden h-5 w-px bg-sidebar-border sm:block" />}
               <Link
                 to="/settings"
                 aria-label="Settings"
                 className={cn(
-                  "inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground",
-                  pathname === "/settings" && "border-primary/40 text-primary",
+                  "inline-flex items-center justify-center rounded-lg border text-muted-foreground hover:text-foreground",
+                  isLanding
+                    ? "h-8 w-8 border-transparent text-sidebar-foreground/60 hover:bg-white/10 hover:text-white"
+                    : "h-10 w-10 border-border bg-card",
+                  pathname === "/settings" && !isLanding && "border-primary/40 text-primary",
                 )}
               >
                 <Settings className="h-4 w-4" />
               </Link>
-              <button className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground">
+              <button
+                className={cn(
+                  "relative inline-flex items-center justify-center rounded-lg border text-muted-foreground hover:text-foreground",
+                  isLanding ? "h-8 w-8 border-transparent text-sidebar-foreground/60 hover:bg-white/10 hover:text-white" : "h-10 w-10 border-border bg-card",
+                )}
+              >
                 <Bell className="h-4 w-4" />
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
+                <span className={cn("absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-destructive", isLanding && "ring-2 ring-sidebar")} />
               </button>
               {user && (
                 <>
+                  {isLanding && <div className="hidden h-5 w-px bg-sidebar-border sm:block" />}
                   <button
                     onClick={() => {
                       logout();
                       navigate({ to: "/login" });
                     }}
-                    className="hidden items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium hover:bg-accent sm:inline-flex"
+                    className={cn(
+                      "hidden items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium sm:inline-flex",
+                      isLanding ? "border-sidebar-border text-sidebar-foreground/70 hover:bg-white/5" : "border-border bg-card hover:bg-accent",
+                    )}
                   >
                     Sign out
                   </button>
-                  <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-2 pr-3">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-md gradient-primary text-[11px] font-semibold text-primary-foreground">
+                  <div
+                    className={cn(
+                      "flex items-center gap-2.5",
+                      isLanding ? "h-9" : "h-10 rounded-lg border border-border bg-card px-2 pr-3",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "flex items-center justify-center font-semibold text-primary-foreground",
+                        isLanding ? "h-8 w-8 rounded-full bg-primary text-xs" : "h-7 w-7 rounded-md gradient-primary text-[11px]",
+                      )}
+                    >
                       {initialsFromName(user.name)}
                     </div>
                     <div className="hidden text-left leading-tight sm:block">
-                      <div className="text-xs font-semibold">{user.name}</div>
-                      <div className="text-[10px] text-muted-foreground">{user.role ?? "Risk Validator"}</div>
+                      <div className={cn("text-xs font-semibold", isLanding && "text-white")}>{user.name}</div>
+                      <div className={cn("text-[10px]", isLanding ? "text-sidebar-foreground/60" : "text-muted-foreground")}>{user.role ?? "Risk Validator"}</div>
                     </div>
                   </div>
                 </>

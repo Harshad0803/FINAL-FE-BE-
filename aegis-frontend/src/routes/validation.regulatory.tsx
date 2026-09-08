@@ -1,15 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { PageHeader } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card as UiCard } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRight, Loader2, Search } from "lucide-react";
+import { ArrowRight, Loader2, Search, ShieldCheck, Microscope, Scale } from "lucide-react";
 import { ApiError, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { CheckSummaryTiles, deriveCheckTotal } from "@/components/check-summary";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard, VEmptyState } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/regulatory")({
   head: () => ({ meta: [{ title: "Stage 6 — Explainability and Fairness — Aegis Credit" }] }),
@@ -89,13 +87,13 @@ function statusStyle(status: string | undefined) {
 
 function ThresholdCheckCard({ check }: { check: ThresholdCheck }) {
   const s = statusStyle(check.status);
-  const sevClasses = SEVERITY_STYLES[check.severity?.toUpperCase()] ?? "bg-muted text-foreground";
+  const sevClasses = SEVERITY_STYLES[check.severity?.toUpperCase()] ?? "bg-slate-200 text-slate-700";
   const isConvention = isQuantitativeConventionCheck(check.check_type);
   return (
     <div className={`min-w-0 rounded-r-lg border-l-4 ${s.border} ${s.bg} p-4`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 break-words text-sm font-semibold text-foreground">
-          {s.icon} <span className="text-muted-foreground">[{check.check_id}]</span> {check.title}{" "}
+        <div className="min-w-0 flex-1 break-words text-sm font-semibold text-slate-900">
+          {s.icon} <span className="text-slate-400">[{check.check_id}]</span> {check.title}{" "}
           <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${sevClasses}`}>
             {check.severity}
           </span>
@@ -103,22 +101,22 @@ function ThresholdCheckCard({ check }: { check: ThresholdCheck }) {
         <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-bold ${s.badge}`}>{check.status}</span>
       </div>
       {isConvention ? (
-        <div className="mt-2 text-xs text-muted-foreground">
-          📋 Regulatory basis: {check.source} {check.principle} — requires this to be assessed/documented
+        <div className="mt-2 text-xs text-slate-500">
+          Regulatory basis: {check.source} {check.principle} — requires this to be assessed/documented
         </div>
       ) : (
-        <div className="mt-2 text-xs text-muted-foreground">
-          📋 {check.source} — {check.principle}
+        <div className="mt-2 text-xs text-slate-500">
+          {check.source} — {check.principle}
         </div>
       )}
-      <div className="mt-2 text-sm text-foreground">
-        📊 Observed: <code className="text-foreground/90">{check.observed}</code>
+      <div className="mt-2 text-sm text-slate-800">
+        Observed: <code className="text-slate-700">{check.observed}</code>
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        📐 Threshold: {check.threshold}
+      <div className="mt-1 text-xs text-slate-500">
+        Threshold: {check.threshold}
         {isConvention ? " — industry-standard convention" : ""}
       </div>
-      {check.detail ? <div className="mt-2 text-sm text-muted-foreground">💡 {check.detail}</div> : null}
+      {check.detail ? <div className="mt-2 text-sm text-slate-500">{check.detail}</div> : null}
     </div>
   );
 }
@@ -349,16 +347,20 @@ function Regulatory() {
   }, [biasAucRows, biasAucMean]);
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Stage 6 — Explainability and Fairness"
+    <div className="space-y-6">
+      <StageHero
+        eyebrow="STAGE 6 · MODEL VALIDATION"
+        title="Explainability and Fairness"
         description="SS1/23 · SS11/13 · IFRS 9 · IFRS 7 — automated regulatory compliance checks and model explainability review."
+        chips={
+          data ? <HeroChip tone={progress === 100 ? "success" : "neutral"}>{summary.pass}/{totalChecks} compliance checks passed</HeroChip> : <HeroChip>Not yet run</HeroChip>
+        }
       />
 
       {loading ? (
-        <div className="rounded-xl border border-border bg-card p-6 text-center">Loading Stage 6 checks...</div>
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center">Loading Stage 6 checks...</div>
       ) : error ? (
-        <div className="rounded-xl border border-border bg-card p-6 text-destructive">Error loading Stage 6: {error}</div>
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">Error loading Stage 6: {error}</div>
       ) : (
         <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="w-full">
           <TabsList>
@@ -367,19 +369,18 @@ function Regulatory() {
           </TabsList>
 
           <TabsContent value="compliance" className="space-y-6 pt-4">
-            <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-              <h3 className="text-sm font-semibold">Regulatory Compliance Results (7.1–7.10)</h3>
-              <CheckSummaryTiles summary={summary} checksLabel="Total Checks" className="mt-4" />
-              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <VCard icon={ShieldCheck} title="Regulatory Compliance Results (7.1–7.10)">
+              <CheckSummaryTiles summary={summary} checksLabel="Total Checks" />
+              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                 <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
               </div>
-            </section>
+            </VCard>
 
             <div className="mx-auto max-w-2xl space-y-3">
               {data?.checks && data.checks.length > 0 ? (
                 data.checks.map((c) => <ThresholdCheckCard key={c.check_id} check={c} />)
               ) : (
-                <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
                   No regulatory compliance checks generated for this stage.
                 </div>
               )}
@@ -387,40 +388,22 @@ function Regulatory() {
           </TabsContent>
 
           <TabsContent value="explainability" className="space-y-6 pt-4">
-            <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-              <h3 className="text-sm font-semibold">🔬 SHAP Feature Importance (from Stage 3 Replication)</h3>
-              <p className="text-xs text-muted-foreground">
-                Reuses the replicated model's feature importances computed in Stage 3 — no re-training here.
-              </p>
-
+            <VCard icon={Microscope} title="SHAP Feature Importance (from Stage 3 Replication)" sub="Reuses the replicated model's feature importances computed in Stage 3 — no re-training here.">
               {featureImportanceFigure ? (
-                <div className="mt-4 h-[420px]">
+                <div className="h-[420px]">
                   <PlotlyChart figure={featureImportanceFigure} style={{ height: "100%" }} />
                 </div>
               ) : (
-                <div className="mt-4 rounded-xl border border-dashed border-border bg-background p-8 text-center text-sm text-muted-foreground">
-                  Feature importances not available. Run Stage 3 Model Replication first to populate this chart.
-                </div>
+                <VEmptyState icon={Microscope} title="Feature importances not available" description="Run Stage 3 Model Replication first to populate this chart." />
               )}
-              <p className="mt-2 text-xs text-muted-foreground">Top 15 Feature Importances (Replicated Model)</p>
-            </section>
+              {featureImportanceFigure && <p className="mt-2 text-xs text-slate-500">Top 15 Feature Importances (Replicated Model)</p>}
+            </VCard>
 
-            <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-              <h3 className="text-sm font-semibold">⚖️ Fair Lending Bias Check</h3>
-              <p className="text-xs text-muted-foreground">
-                Check if model performance differs significantly across protected characteristics. Large gaps may
-                indicate discriminatory bias.
-              </p>
-
+            <VCard icon={Scale} title="Fair Lending Bias Check" sub="Check if model performance differs significantly across protected characteristics. Large gaps may indicate discriminatory bias.">
               {!datasetFile ? (
-                <div className="mt-4 rounded-xl border border-dashed border-border bg-background p-8 text-center text-sm text-muted-foreground">
-                  No dataset available. Complete Stage 1 Intake and Stage 2 Data Validation first.
-                </div>
+                <VEmptyState icon={Scale} title="No dataset available" description="Complete Stage 1 Intake and Stage 2 Data Validation first." />
               ) : biasData && biasData.protected_columns.length === 0 ? (
-                <div className="mt-4 rounded-xl border border-dashed border-border bg-background p-8 text-center text-sm text-muted-foreground">
-                  No protected characteristic columns detected in the dataset. Common ones: age, gender, region,
-                  employment, education.
-                </div>
+                <VEmptyState icon={Scale} title="No protected characteristics detected" description="Common ones: age, gender, region, employment, education." />
               ) : (
                 <>
                   <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -429,7 +412,7 @@ function Regulatory() {
                       <select
                         value={biasCol}
                         onChange={(e) => setBiasCol(e.target.value)}
-                        className="w-56 rounded-lg border border-border bg-background px-3 py-2"
+                        className="w-56 rounded-lg border border-slate-200 bg-white px-3 py-2"
                       >
                         <option value="" disabled>
                           Choose a column…
@@ -445,20 +428,20 @@ function Regulatory() {
                       type="button"
                       onClick={() => void runBiasCheck()}
                       disabled={!biasCol || biasLoading}
-                      className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(37,99,235,0.35)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {biasLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                       Run Bias Check
                     </button>
                   </div>
 
-                  {biasError ? <p className="mt-3 text-sm text-destructive">{biasError}</p> : null}
+                  {biasError ? <p className="mt-3 text-sm text-red-600">{biasError}</p> : null}
 
                   {biasData?.rows && biasData.rows.length > 0 ? (
                     <>
-                      <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+                      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
                         <table className="w-full text-sm">
-                          <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                             <tr>
                               <th className="px-3 py-2 text-left">#</th>
                               <th className="px-3 py-2 text-left">Group</th>
@@ -468,11 +451,11 @@ function Regulatory() {
                               <th className="px-3 py-2 text-right">AUC</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-border">
+                          <tbody className="divide-y divide-slate-100">
                             {biasData.rows.map((r, rowIndex) => (
                               <tr key={r.Group}>
-                                <td className="px-3 py-2 text-muted-foreground">{rowIndex + 1}</td>
-                                <td className="px-3 py-2 font-medium">{r.Group}</td>
+                                <td className="px-3 py-2 text-slate-400">{rowIndex + 1}</td>
+                                <td className="px-3 py-2 font-medium text-slate-900">{r.Group}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{r.Count.toLocaleString()}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{(r["Default Rate"] * 100).toFixed(2)}%</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{(r["Avg Predicted PD"] * 100).toFixed(2)}%</td>
@@ -493,7 +476,7 @@ function Regulatory() {
 
                 </>
               )}
-            </section>
+            </VCard>
           </TabsContent>
         </Tabs>
       )}
@@ -503,7 +486,7 @@ function Regulatory() {
           <button
             type="button"
             onClick={() => setActiveSubTab("compliance")}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
           >
             Continue
             <ArrowRight className="h-4 w-4" />
@@ -511,7 +494,7 @@ function Regulatory() {
         ) : (
           <Link
             to="/validation/findings"
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
           >
             Continue to Stage 7
             <ArrowRight className="h-4 w-4" />

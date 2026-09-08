@@ -1,13 +1,11 @@
 import React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageHeader } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card as UiCard } from "@/components/ui/card";
-import { ArrowRight, AlertCircle, Loader2, PlayCircle, Upload } from "lucide-react";
+import { ArrowRight, AlertCircle, Loader2, PlayCircle, Upload, BarChart3, Database } from "lucide-react";
 import { useDataset } from "@/lib/app-context";
 import PlotlyChart from "@/components/plotly-chart";
 import { ApiError, formUpload } from "@/lib/api";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard, VEmptyState } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/performance")({
   head: () => ({ meta: [{ title: "Benchmarking — Aegis Credit" }] }),
@@ -370,65 +368,65 @@ function Performance() {
   }, [benchmarkOverlayData]);
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Stage 4 — Benchmarking"
+    <div className="space-y-6">
+      <StageHero
+        eyebrow="STAGE 4 · MODEL VALIDATION"
+        title="Benchmarking"
         description="Compare the champion model against an industry-standard challenger before stress testing and regulatory review."
+        chips={
+          <>
+            <HeroChip>Benchmarking</HeroChip>
+            <HeroChip tone={payload ? "success" : "neutral"}>{payload ? "Benchmark complete" : "Live comparison"}</HeroChip>
+          </>
+        }
       />
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Benchmarking</Badge>
-        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Live comparison</Badge>
-      </div>
 
       {loading ? (
-        <section className="flex items-center gap-2 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-elegant">
+        <section className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
           <Loader2 className="h-4 w-4 animate-spin" />
           Running Stage 4 benchmarking analysis on the shared dataset…
         </section>
       ) : null}
 
       {error ? (
-        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       ) : null}
 
-      <section className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
+      <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
         {datasetReady ? (
-          <>Using the shared dataset from Stage 1 / Stage 2: <span className="font-semibold text-foreground">{datasetName}</span>.</>
+          <>Using the shared dataset from Stage 1 / Stage 2: <span className="font-semibold text-slate-900">{datasetName}</span>.</>
         ) : (
           <>No active dataset is available in shared state yet. Complete Stage 1 Intake and Stage 2 Data Validation first.</>
         )}
       </section>
 
       {!payload && !loading ? (
-        <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-elegant">
-          {datasetReady
-            ? "Run Compare Challengers below, select a challenger model, then Run Benchmark to see the champion-vs-challenger comparison."
-            : "Waiting on a dataset from Stage 1/Stage 2 to run the Stage 4 benchmark report."}
-        </div>
+        <VEmptyState
+          icon={BarChart3}
+          title={datasetReady ? "Benchmark not yet run" : "Waiting on a dataset"}
+          description={
+            datasetReady
+              ? "Run Compare Challengers below, select a challenger model, then Run Benchmark to see the champion-vs-challenger comparison."
+              : "Waiting on a dataset from Stage 1/Stage 2 to run the Stage 4 benchmark report."
+          }
+        />
       ) : null}
 
       {datasetReady ? (
         <div className="space-y-6">
-          <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-            <h3 className="text-sm font-semibold">Compare challenger models</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Reuses the same lightweight, no-CV comparison from the model development pipeline's
-              Model Selection step — fit → predict → summary metrics per model, so you can see which
-              challenger is worth benchmarking against before committing to one.
-            </p>
-
-            <div className="mt-4 flex flex-wrap gap-2">
+          <VCard icon={Database} title="Compare challenger models" sub="Reuses the same lightweight, no-CV comparison from the model development pipeline's Model Selection step — fit → predict → summary metrics per model, so you can see which challenger is worth benchmarking against before committing to one.">
+            <div className="flex flex-wrap gap-2">
               {CHALLENGER_CANDIDATES.map((name) => (
                 <label
                   key={name}
                   className={
                     "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium " +
                     (selectedCandidates.includes(name)
-                      ? "border-primary/40 bg-primary-soft text-foreground"
-                      : "border-border bg-background text-muted-foreground")
+                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                      : "border-slate-200 bg-white text-slate-500")
                   }
                 >
                   <input
@@ -447,27 +445,27 @@ function Performance() {
                 type="button"
                 onClick={() => void runComparison()}
                 disabled={comparing || !datasetFile || selectedCandidates.length === 0}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(37,99,235,0.35)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {comparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
                 Compare Challengers
               </button>
-              <span className="text-xs text-muted-foreground">
-                Current challenger: <span className="font-semibold text-foreground">{challengerModelName}</span>
+              <span className="text-xs text-slate-500">
+                Current challenger: <span className="font-semibold text-slate-900">{challengerModelName}</span>
               </span>
             </div>
 
             {comparisonError ? (
-              <div className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{comparisonError}</span>
               </div>
             ) : null}
 
             {comparisonRows && comparisonRows.length > 0 ? (
-              <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-sm">
-                  <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                     <tr>
                       <th className="px-3 py-2 text-left">Model</th>
                       <th className="px-3 py-2 text-right">ROC-AUC</th>
@@ -478,22 +476,22 @@ function Performance() {
                       <th className="px-3 py-2 text-left">Select challenger model</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-slate-100">
                     {comparisonRows.map((row) => {
                       const isSelected = row.model_name === challengerModelName;
                       const gini = typeof row.gini === "number" ? row.gini : (typeof row.roc_auc === "number" ? 2 * row.roc_auc - 1 : undefined);
                       return (
-                        <tr key={row.model_name} className={isSelected ? "bg-primary-soft" : undefined}>
-                          <td className="px-3 py-2 font-medium">{row.model_name}</td>
+                        <tr key={row.model_name} className={isSelected ? "bg-blue-50/60" : undefined}>
+                          <td className="px-3 py-2 font-medium text-slate-900">{row.model_name}</td>
                           {row.error ? (
-                            <td colSpan={5} className="px-3 py-2 text-xs text-destructive">{row.error}</td>
+                            <td colSpan={5} className="px-3 py-2 text-xs text-red-600">{row.error}</td>
                           ) : (
                             <>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.roc_auc, 3)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatValue(gini, 3)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.recall, 3)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.ks, 3)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.training_time_s, 2)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatValue(row.roc_auc, 3)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatValue(gini, 3)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatValue(row.recall, 3)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatValue(row.ks, 3)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatValue(row.training_time_s, 2)}</td>
                             </>
                           )}
                           <td className="px-3 py-2">
@@ -512,8 +510,8 @@ function Performance() {
                               className={
                                 "rounded-lg border px-3 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 " +
                                 (isSelected
-                                  ? "border-primary bg-primary text-primary-foreground"
-                                  : "border-border bg-background hover:border-primary/40")
+                                  ? "border-blue-600 bg-blue-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-300")
                               }
                             >
                               {isSelected ? "Selected" : "Select"}
@@ -526,17 +524,16 @@ function Performance() {
                 </table>
               </div>
             ) : null}
-          </section>
+          </VCard>
 
-          <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
+          <VCard icon={BarChart3} title="Champion vs Challenger">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="text-sm">
-                <span className="font-medium">Champion vs Challenger</span>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="text-xs text-slate-500">
                   {challengerPicked ? (
                     <>
                       Benchmarks the champion model against{" "}
-                      <span className="font-semibold text-foreground">{challengerModelName}</span> — pick a
+                      <span className="font-semibold text-slate-900">{challengerModelName}</span> — pick a
                       different row above and re-run to compare against another challenger.
                     </>
                   ) : (
@@ -545,18 +542,18 @@ function Performance() {
                 </p>
 
                 {hasMddMetrics ? (
-                  <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-                    <span className="font-semibold text-foreground">Champion metrics sourced from MDD</span>{" "}
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-500">
+                    <span className="font-semibold text-slate-900">Champion metrics sourced from MDD</span>{" "}
                     (Stage 1 — Intake &amp; Governance):{" "}
                     {Object.entries(mddMetricsFromIntake as Record<string, any>)
                       .map(([k, v]) => `${k.replace(/_/g, " ")}=${v}`)
                       .join(", ")}
                   </div>
                 ) : (
-                  <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                     No MDD metrics found from Stage 1 (Intake &amp; Governance). Go back and upload the MDD
                     there, or parse one here as a fallback:
-                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-foreground hover:underline">
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-slate-900 hover:underline">
                       <Upload className="h-3.5 w-3.5" />
                       <span>{mddParsing ? "Parsing…" : "Upload & Parse MDD"}</span>
                       <input
@@ -586,7 +583,7 @@ function Performance() {
                         }}
                       />
                     </label>
-                    {mddParseError ? <div className="mt-1 text-destructive">{mddParseError}</div> : null}
+                    {mddParseError ? <div className="mt-1 text-red-700">{mddParseError}</div> : null}
                   </div>
                 )}
               </div>
@@ -594,20 +591,20 @@ function Performance() {
                 type="button"
                 onClick={() => handleRun()}
                 disabled={loading || !datasetFile || !challengerPicked || !hasMddMetrics}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(37,99,235,0.35)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
                 Run Benchmark
               </button>
             </div>
-          </section>
+          </VCard>
 
           {payload ? (
             <>
               <Card title="Industry benchmark table" sub="Selected challenger benchmark versus champion model">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                       <tr>
                         <th className="px-3 py-2 text-left">#</th>
                         <th className="px-3 py-2 text-left">Model</th>
@@ -616,11 +613,11 @@ function Performance() {
                         <th className="px-3 py-2 text-right">Recall</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody className="divide-y divide-slate-100">
                       {benchmarkTableRows.map((row, rowIndex) => (
                         <tr key={row.model}>
-                          <td className="px-3 py-2 text-muted-foreground">{rowIndex + 1}</td>
-                          <td className="px-3 py-2 font-medium">{row.model}</td>
+                          <td className="px-3 py-2 text-slate-400">{rowIndex + 1}</td>
+                          <td className="px-3 py-2 font-medium text-slate-900">{row.model}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.roc_auc, 3)}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.gini, 3)}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatValue(row.recall, 3)}</td>
@@ -652,7 +649,7 @@ function Performance() {
       <div className="sticky bottom-4 z-40 flex justify-end pr-4 md:pr-8">
         <Link
           to="/validation/stress"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
         >
           Continue to Stage 5
           <ArrowRight className="h-4 w-4" />
@@ -664,10 +661,10 @@ function Performance() {
 
 function Card({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <UiCard className="p-6 shadow-elegant">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      {sub && <p className="text-xs text-slate-500">{sub}</p>}
       <div className="mt-4 h-56">{children}</div>
-    </UiCard>
+    </div>
   );
 }

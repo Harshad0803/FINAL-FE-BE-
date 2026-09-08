@@ -1,8 +1,5 @@
 import React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageHeader } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card as UiCard } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowRight,
@@ -15,11 +12,15 @@ import {
   XCircle,
   MinusCircle,
   Database,
+  GitCompareArrows,
+  ListChecks,
+  Clock,
 } from "lucide-react";
 import PlotlyChart from "@/components/plotly-chart";
 import { formUpload, ApiError } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard, VEmptyState, KpiStrip } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/challenger")({
   head: () => ({ meta: [{ title: "Model Replication & Performance — Aegis Credit" }] }),
@@ -121,6 +122,32 @@ function StatusIcon({ s }: { s: CheckStatus }) {
   if (s === "WARN") return <AlertTriangle className="h-3.5 w-3.5" />;
   if (s === "FAIL") return <XCircle className="h-3.5 w-3.5" />;
   return <MinusCircle className="h-3.5 w-3.5" />;
+}
+
+// Reference (developer-reported) vs Replicated (independently re-trained)
+// comparison tile — the actual pass/fail verdict for this metric still comes
+// only from the real R4.x check below; this tile shows the real delta
+// between the two real numbers, nothing more.
+function MetricComparisonTile({ label, replicated, reported }: { label: string; replicated: number | null; reported: number | null }) {
+  const delta = replicated !== null && reported !== null ? Math.abs(replicated - reported) : null;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="h-[3px] bg-gradient-to-r from-blue-500 to-indigo-500" />
+      <div className="px-4 py-3.5">
+        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+        <div className="mt-2 font-mono text-2xl font-bold leading-none text-slate-900">
+          {replicated !== null ? replicated.toFixed(3) : "—"}
+        </div>
+        {reported !== null ? (
+          <div className="mt-2 text-[11px] font-semibold text-slate-500">
+            Δ {delta !== null ? delta.toFixed(3) : "—"} <span className="font-normal text-slate-400">vs reported {reported.toFixed(3)}</span>
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-slate-400">No reported value</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const REPORTED_METRIC_FIELDS: Array<{ key: string; label: string }> = [
@@ -412,6 +439,30 @@ function ModelReplicationPanel({
 
   const metrics = replication?.result?.metrics ?? {};
 
+  // Real reported values, parsed to numbers where the reviewer actually
+  // entered/extracted one — used only for the informational Reference vs
+  // Replicated delta tiles, never for a derived pass/fail verdict (that
+  // comes solely from the real R4.x checks below).
+  const reportedNumeric = React.useMemo(() => {
+    const out: Record<string, number | null> = {};
+    for (const { key } of REPORTED_METRIC_FIELDS) {
+      const raw = reported[key];
+      const num = raw !== undefined && raw !== "" ? Number(raw) : NaN;
+      out[key] = Number.isFinite(num) ? num : null;
+    }
+    return out;
+  }, [reported]);
+
+  const checkCounts = React.useMemo(() => {
+    const checks = replication?.checks ?? [];
+    return {
+      total: checks.length,
+      pass: checks.filter((c) => c.status === "PASS").length,
+      fail: checks.filter((c) => c.status === "FAIL").length,
+      warn: checks.filter((c) => c.status === "WARN").length,
+    };
+  }, [replication]);
+
   // --- Performance tab data (ported from the old Stage 4 "Performance" tab) ---
   const metricCards = React.useMemo(() => {
     const m = performanceReport?.metrics ?? {};
@@ -553,19 +604,13 @@ function ModelReplicationPanel({
   }, [scoreBins]);
 
   return (
-    <UiCard className="p-6 shadow-elegant">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold">Model Replication</h3>
-          <p className="mt-1 text-sm text-foreground/80">
-            Independently re-train the submitted model on the validation dataset and run checks R4.1–R4.8
-            against developer-reported metrics.
-          </p>
-        </div>
-      </div>
-
+    <VCard
+      icon={GitCompareArrows}
+      title="Model Replication"
+      sub="Independently re-train the submitted model on the validation dataset and run checks R4.1–R4.8 against developer-reported metrics."
+    >
       {/* Dataset source */}
-      <div className="mt-5 rounded-lg border border-border bg-background p-4">
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           <Database className="h-3.5 w-3.5" /> Dataset
         </div>
@@ -585,7 +630,7 @@ function ModelReplicationPanel({
         )}
         {(!contextFileAvailable || localFile) && (
           <div className="mt-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500 hover:border-blue-400">
               <UploadCloud className="h-4 w-4" />
               {localFile ? localFile.name : "Upload dataset (CSV or XLSX)"}
               <input
@@ -616,7 +661,7 @@ function ModelReplicationPanel({
             value={targetCol}
             onChange={(e) => setTargetCol(e.target.value)}
             placeholder="e.g. default_flag"
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           />
           <datalist id="replication-target-candidates">
             {[...targetCandidates, ...allColumns].map((c) => (
@@ -631,7 +676,7 @@ function ModelReplicationPanel({
             value={modelIdentity}
             onChange={(e) => setModelIdentity(e.target.value)}
             placeholder="e.g. Credit Risk PD Model"
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           />
         </div>
 
@@ -640,7 +685,7 @@ function ModelReplicationPanel({
           <select
             value={algorithm}
             onChange={(e) => setAlgorithm(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             {MODEL_OPTIONS.map((m) => (
               <option key={m} value={m}>
@@ -659,7 +704,7 @@ function ModelReplicationPanel({
             max={0.4}
             value={testSize}
             onChange={(e) => setTestSize(Number(e.target.value))}
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           />
         </div>
 
@@ -672,13 +717,13 @@ function ModelReplicationPanel({
             max={0.4}
             value={valSize}
             onChange={(e) => setValSize(Number(e.target.value))}
-            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
           />
         </div>
       </div>
 
       {/* Reported metrics + MDD */}
-      <div className="mt-4 rounded-lg border border-border bg-background p-4">
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Developer-reported metrics (for R4.2 / R4.3 / R4.4 / R4.8)
@@ -706,7 +751,7 @@ function ModelReplicationPanel({
                 value={reported[key] ?? ""}
                 onChange={(e) => setReported((prev) => ({ ...prev, [key]: e.target.value }))}
                 placeholder="—"
-                className="mt-1 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm"
               />
             </div>
           ))}
@@ -714,7 +759,7 @@ function ModelReplicationPanel({
       </div>
 
       {error && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           <XCircle className="h-4 w-4 shrink-0" /> {error}
         </div>
       )}
@@ -723,31 +768,52 @@ function ModelReplicationPanel({
         <button
           onClick={runReplication}
           disabled={loading}
-          className="inline-flex items-center gap-2 rounded-lg gradient-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_6px_20px_rgba(37,99,235,0.35)] transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
           {loading ? "Running replication…" : "Run replication"}
         </button>
       </div>
 
+      {/* Purposeful empty state before the first run, instead of a blank gap */}
+      {!replication && !loading && (
+        <div className="mt-6">
+          <VEmptyState
+            icon={GitCompareArrows}
+            title="Replication has not been run yet"
+            description="Configure the dataset, target column, and model above, then run replication to see the R4.1–R4.8 checks and performance profile."
+          />
+        </div>
+      )}
+
       {/* Results */}
       {replication && (
         <div className="mt-6 space-y-6">
           {replication.result.success ? (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {flags.length === 0 ? "No failing checks" : `${flags.length} failing check${flags.length === 1 ? "" : "s"}`}
-                </span>
-                {flags.map((f) => (
-                  <span key={f} className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">
-                    {f}
-                  </span>
-                ))}
-                <span className="ml-auto text-xs text-muted-foreground">
-                  Completed in {replication.result.timing_s}s
-                </span>
-              </div>
+              <KpiStrip
+                tiles={[
+                  {
+                    icon: checkCounts.fail === 0 ? CheckCircle2 : XCircle,
+                    label: "Replication Status",
+                    value: checkCounts.fail === 0 ? "Passed" : "Failed",
+                    sub: checkCounts.fail === 0 ? "All checks satisfied" : `${checkCounts.fail} check${checkCounts.fail === 1 ? "" : "s"} failing`,
+                    tone: checkCounts.fail === 0 ? "emerald" : "rose",
+                  },
+                  {
+                    icon: ListChecks, label: "Checks Passed", value: `${checkCounts.pass}/${checkCounts.total}`,
+                    sub: "R4.1–R4.8 automated checks", tone: checkCounts.pass === checkCounts.total ? "emerald" : "amber",
+                  },
+                  {
+                    icon: AlertTriangle, label: "Failing Checks", value: flags.length,
+                    sub: flags.length ? flags.join(", ") : "None", tone: flags.length ? "rose" : "emerald",
+                  },
+                  {
+                    icon: Clock, label: "Elapsed Time", value: `${replication.result.timing_s}s`,
+                    sub: "Independent re-training run", tone: "slate",
+                  },
+                ]}
+              />
 
               <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="w-full">
                 <TabsList>
@@ -756,27 +822,45 @@ function ModelReplicationPanel({
                 </TabsList>
 
                 <TabsContent value="replication" className="space-y-6 pt-4">
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
-                    {["roc_auc", "gini", "ks", "accuracy", "precision", "recall", "f1"].map((k) => (
-                      <div key={k} className="rounded-lg border border-border bg-background p-3">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{k.replace("_", " ")}</div>
-                        <div className="mt-1 text-lg font-semibold tabular-nums">
-                          {typeof metrics[k] === "number" ? metrics[k].toFixed(3) : "—"}
-                        </div>
+                  {/* Reference (developer-reported) vs Replicated — the central
+                      question this stage answers, made explicit rather than a
+                      flat list of only the replicated numbers. */}
+                  <div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">Reference vs Replicated</h4>
+                        <p className="text-xs text-slate-400">Developer-reported metrics vs this independent re-training run</p>
                       </div>
-                    ))}
-                    <div className="rounded-lg border border-border bg-background p-3">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">cv mean auc</div>
-                      <div className="mt-1 text-lg font-semibold tabular-nums">
-                        {typeof replication.result.cv_mean_auc === "number" ? replication.result.cv_mean_auc.toFixed(3) : "—"}
-                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {["roc_auc", "gini", "ks", "accuracy", "precision", "recall", "f1", "cv_mean_auc"].map((k) => {
+                        const rawValue = k === "cv_mean_auc" ? replication.result.cv_mean_auc : metrics[k];
+                        const replicatedValue = typeof rawValue === "number" ? rawValue : null;
+                        return (
+                          <MetricComparisonTile
+                            key={k}
+                            label={k.replace(/_/g, " ")}
+                            replicated={replicatedValue}
+                            reported={reportedNumeric[k] ?? null}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
 
                   {/* Checks table */}
-                  <div className="overflow-x-auto rounded-lg border border-border">
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">Replication Check Results</div>
+                        <div className="text-xs text-slate-400">R4.1 – R4.8 automated validation checks</div>
+                      </div>
+                      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                        {checkCounts.pass}/{checkCounts.total} passed
+                      </span>
+                    </div>
                     <table className="w-full text-sm">
-                      <thead className="bg-background text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
                         <tr>
                           <th className="px-4 py-2 text-left">#</th>
                           <th className="px-4 py-2 text-left">ID</th>
@@ -785,13 +869,13 @@ function ModelReplicationPanel({
                           <th className="px-4 py-2 text-left">Status</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border">
+                      <tbody className="divide-y divide-slate-100">
                         {replication.checks.map((c, rowIndex) => (
-                          <tr key={c.id}>
-                            <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{rowIndex + 1}</td>
-                            <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{c.id}</td>
-                            <td className="px-4 py-2 font-medium">{c.title}</td>
-                            <td className="px-4 py-2 text-xs text-foreground/80">{c.observed ?? "—"}</td>
+                          <tr key={c.id} className={c.status === "FAIL" ? "bg-red-50/40" : undefined}>
+                            <td className="px-4 py-2 font-mono text-xs text-slate-400">{rowIndex + 1}</td>
+                            <td className="px-4 py-2 font-mono text-xs text-slate-400">{c.id}</td>
+                            <td className="px-4 py-2 font-medium text-slate-900">{c.title}</td>
+                            <td className="px-4 py-2 text-xs text-slate-600">{c.observed ?? "—"}</td>
                             <td className="px-4 py-2">
                               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusStyles[c.status]}`}>
                                 <StatusIcon s={c.status} />
@@ -831,24 +915,26 @@ function ModelReplicationPanel({
                 <TabsContent value="performance" className="space-y-8 pt-4">
                   <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
                     {metricCards.map((m) => (
-                      <div key={m.label} className="rounded-xl border border-border bg-background p-4">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{m.label}</div>
-                        <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums">{m.value}</div>
+                      <div key={m.label} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <div className="h-[3px] bg-gradient-to-r from-blue-500 to-indigo-500" />
+                        <div className="px-4 py-3.5">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{m.label}</div>
+                          <div className="mt-2 font-mono text-2xl font-bold leading-none text-slate-900">{m.value}</div>
+                        </div>
                       </div>
                     ))}
-                    <div className="rounded-xl border border-border bg-background p-4">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Train/Test AUC Gap</div>
-                      <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums">
-                        {gap ? formatValue(gap.gap, 3) : "—"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Status: {gap?.status ?? "—"}
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                      <div className={`h-[3px] ${gap?.status === "FAIL" ? "bg-gradient-to-r from-red-400 to-red-500" : "bg-gradient-to-r from-blue-500 to-indigo-500"}`} />
+                      <div className="px-4 py-3.5">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Train/Test AUC Gap</div>
+                        <div className="mt-2 font-mono text-2xl font-bold leading-none text-slate-900">{gap ? formatValue(gap.gap, 3) : "—"}</div>
+                        <div className="mt-2 text-[11px] font-semibold text-slate-500">Status: {gap?.status ?? "—"}</div>
                       </div>
                     </div>
                   </section>
 
                   <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                    <div className="rounded-xl border border-border bg-background p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                       <h3 className="text-sm font-semibold">ROC curve</h3>
                       <p className="text-xs text-muted-foreground">AUC {formatValue(performanceReport?.roc_curve?.auc, 3)}</p>
                       <div className="mt-4 h-56">
@@ -856,7 +942,7 @@ function ModelReplicationPanel({
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border bg-background p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                       <h3 className="text-sm font-semibold">Precision–Recall</h3>
                       <p className="text-xs text-muted-foreground">
                         Average precision {formatValue(performanceReport?.pr_curve?.average_precision, 3)}
@@ -866,7 +952,7 @@ function ModelReplicationPanel({
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border bg-background p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                       <h3 className="text-sm font-semibold">Confusion matrix</h3>
                       <p className="text-xs text-muted-foreground">
                         {thresholdSelection
@@ -884,21 +970,36 @@ function ModelReplicationPanel({
                             </span>
                           </div>
                           <div className="grid flex-1 grid-cols-2 gap-3">
-                            {confusionMatrix?.matrix?.length
+                            {confusionMatrix?.matrix?.length === 2
+                              ? confusionMatrix.matrix.flatMap((row, rowIndex) =>
+                                  row.map((value, colIndex) => {
+                                    // Standard binary quadrant labels — row 0 = Actual
+                                    // negative, col 0 = Predicted negative, matching
+                                    // the real backend's labels/matrix ordering.
+                                    const quadrant =
+                                      rowIndex === 0 && colIndex === 0 ? { label: "TN", classes: "border-blue-200 bg-blue-50 text-blue-800" }
+                                      : rowIndex === 0 && colIndex === 1 ? { label: "FP", classes: "border-red-200 bg-red-50 text-red-700" }
+                                      : rowIndex === 1 && colIndex === 0 ? { label: "FN", classes: "border-amber-200 bg-amber-50 text-amber-700" }
+                                      : { label: "TP", classes: "border-emerald-200 bg-emerald-50 text-emerald-800" };
+                                    return (
+                                      <div key={`${rowIndex}-${colIndex}`} className={`flex flex-col justify-between rounded-xl border p-4 ${quadrant.classes}`}>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">{quadrant.label}</span>
+                                        <span className="font-mono text-2xl font-bold tabular-nums">{value.toLocaleString()}</span>
+                                      </div>
+                                    );
+                                  }),
+                                )
+                              : confusionMatrix?.matrix?.length
                               ? confusionMatrix.matrix.flatMap((row, rowIndex) =>
                                   row.map((value, colIndex) => {
                                     const label = confusionMatrix.labels?.[colIndex] ?? colIndex;
-                                    const tone = rowIndex === 1 && colIndex === 1 ? "primary" : rowIndex === 0 && colIndex === 1 ? "warning" : "destructive";
+                                    const tone = rowIndex === colIndex ? "primary" : "destructive";
                                     return (
                                       <div
                                         key={`${rowIndex}-${colIndex}`}
                                         className={
                                           "flex flex-col justify-between rounded-xl border p-4 " +
-                                          (tone === "primary"
-                                            ? "border-primary/30 bg-primary-soft"
-                                            : tone === "warning"
-                                              ? "border-warning/40 bg-warning/15"
-                                              : "border-destructive/30 bg-destructive/10")
+                                          (tone === "primary" ? "border-primary/30 bg-primary-soft" : "border-destructive/30 bg-destructive/10")
                                         }
                                       >
                                         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -915,7 +1016,7 @@ function ModelReplicationPanel({
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border bg-background p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                       <h3 className="text-sm font-semibold">Calibration</h3>
                       <p className="text-xs text-muted-foreground">Predicted vs observed default rate</p>
                       <div className="mt-4 h-56">
@@ -923,7 +1024,7 @@ function ModelReplicationPanel({
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border bg-background p-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                       <h3 className="text-sm font-semibold">Score distribution</h3>
                       <p className="text-xs text-muted-foreground">
                         Hold-out set · KS {formatValue(performanceReport?.metrics?.ks, 3)}
@@ -943,7 +1044,7 @@ function ModelReplicationPanel({
           )}
         </div>
       )}
-    </UiCard>
+    </VCard>
   );
 }
 
@@ -955,15 +1056,18 @@ function Challenger() {
   const [activeSubTab, setActiveSubTab] = React.useState<string>("replication");
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Stage 3 — Model Replication & Performance Testing"
+    <div className="space-y-6">
+      <StageHero
+        eyebrow="STAGE 3 · MODEL VALIDATION"
+        title="Model Replication & Performance Testing"
         description="Independently reproduce the developer's submitted model, verify results against the R4.1-R4.8 replication checks, and review its full performance profile on data the model has never seen."
+        chips={
+          <>
+            <HeroChip tone={activeSubTab === "replication" ? "success" : "neutral"}>Replication</HeroChip>
+            <HeroChip tone={activeSubTab === "performance" ? "success" : "neutral"}>Performance review</HeroChip>
+          </>
+        }
       />
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-primary/30 bg-primary-soft text-primary">Replication</Badge>
-        <Badge variant="outline" className="border-border bg-background text-muted-foreground">Performance review</Badge>
-      </div>
 
       <ModelReplicationPanel activeSubTab={activeSubTab} setActiveSubTab={setActiveSubTab} />
 
@@ -972,7 +1076,7 @@ function Challenger() {
           <button
             type="button"
             onClick={() => setActiveSubTab("performance")}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
           >
             Continue
             <ArrowRight className="h-4 w-4" />
@@ -980,7 +1084,7 @@ function Challenger() {
         ) : (
         <Link
           to="/validation/performance"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
         >
           Continue to Stage 4 — Benchmarking
           <ArrowRight className="h-4 w-4" />

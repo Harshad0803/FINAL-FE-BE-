@@ -1,12 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { PageHeader } from "@/components/app-shell";
+import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { api, formUpload } from "@/lib/api";
 import { useDataset } from "@/lib/app-context";
-import { ArrowRight, FileCheck, FileText, Upload, CheckCircle2, Circle } from "lucide-react";
+import { ArrowRight, FileCheck, FileText, Upload, CheckCircle2, PlayCircle, ShieldCheck, ClipboardCheck, AlertTriangle } from "lucide-react";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard, KpiStrip, VEmptyState } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/intake")({
   head: () => ({ meta: [{ title: "Model Intake — Aegis Credit" }] }),
@@ -85,17 +84,69 @@ type IntakeResponse = {
   chk_attestation?: boolean;
 };
 
-// Risk tier is a classification (how much oversight this model needs), not
-// a pass/fail judgment — deliberately NOT the red/amber/green severity scale
-// used elsewhere for HIGH/MEDIUM/LOW findings, since that would wrongly
-// imply a tier itself is "bad." Single blue hue at three intensities instead:
-// darker/bolder = more oversight, lighter = routine, same hue throughout
-// signals "different degree of the same thing," not "different verdict."
-function riskTierTone(value: string): { border: string; bg: string; text: string } {
-  if (value.includes("1")) return { border: "border-blue-700/40", bg: "bg-blue-700/10", text: "text-blue-800" };
-  if (value.includes("2")) return { border: "border-blue-400/40", bg: "bg-blue-400/10", text: "text-blue-600" };
-  if (value.includes("3")) return { border: "border-blue-200/60", bg: "bg-blue-100/40", text: "text-blue-500" };
-  return { border: "border-border", bg: "bg-muted", text: "text-foreground" };
+
+// Extracts just the tier number for the compact badge (e.g. "Tier 1 — High
+// Risk" -> "1") — falls back to "—" rather than guessing when the real
+// value doesn't contain a recognizable tier number yet.
+function tierNumber(value: string): string {
+  const match = value.match(/\d+/);
+  return match ? match[0] : "—";
+}
+
+function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={className}>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">{children}</div>
+    </div>
+  );
+}
+
+function RequiredBadge({ required }: { required: boolean }) {
+  return required ? (
+    <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">Required</span>
+  ) : (
+    <span className="text-xs text-slate-400">Optional</span>
+  );
+}
+
+function ArtifactStatus({ uploaded, parsed }: { uploaded: boolean; parsed?: boolean }) {
+  if (parsed) {
+    return <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">Parsed</span>;
+  }
+  if (uploaded) {
+    return <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Uploaded</span>;
+  }
+  return <span className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Pending</span>;
+}
+
+function UploadAction({ label, accept, onFile }: { label: string; accept: string; onFile: (file: File) => void | Promise<void> }) {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800">
+      <Upload className="h-3.5 w-3.5" />
+      {label}
+      <input
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null;
+          if (f) void onFile(f);
+        }}
+      />
+    </label>
+  );
+}
+
+function ReadinessCheck({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className={`flex items-center gap-2.5 rounded-xl border px-4 py-3 ${ok ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${ok ? "bg-emerald-500" : "bg-amber-400"}`}>
+        {ok ? <CheckCircle2 className="h-3 w-3 text-white" /> : <AlertTriangle className="h-3 w-3 text-white" />}
+      </span>
+      <span className={`text-sm font-medium ${ok ? "text-emerald-800" : "text-amber-800"}`}>{label}</span>
+    </div>
+  );
 }
 
 // Neutral placeholder shown until the reviewer actually loads a demo (or
@@ -448,6 +499,34 @@ function Intake() {
     { key: "Demo B — Flawed Submission", mode: "flawed" },
   ];
 
+  // Real, per-artifact source of truth for the inventory table below and the
+  // readiness strip's "required uploaded" counts — required flags mirror
+  // what Stage 2+ actually needs (dataset, MDD, training code), not Figma's
+  // placeholder set.
+  const artifactRows = [
+    { key: "dataset", label: "Validation Dataset", format: "CSV / XLSX", required: true, uploaded: datasetUploaded, parsed: false, detail: "Needed for Stage 2 data checks" },
+    { key: "mdd", label: "Model Development Document", format: "PDF / DOCX / TXT", required: true, uploaded: mddUploaded, parsed: Boolean(mddMetrics), detail: "Governance evidence for Stage 1" },
+    { key: "training", label: "Training Code / Scripts", format: "ZIP / PY / IPYNB", required: true, uploaded: trainingCodeUploaded, parsed: false, detail: "Required for replication and review" },
+    { key: "profile", label: "Data Profile", format: "CSV / XLSX / PDF", required: false, uploaded: profileUploaded, parsed: false, detail: "Helps check feature coverage" },
+    { key: "assumptions", label: "Assumptions & Limitations", format: "PDF / DOCX / TXT", required: false, uploaded: assumptionsUploaded, parsed: false, detail: "Model limitations and assumptions" },
+    { key: "performance", label: "Performance Report", format: "PDF / DOCX / XLSX", required: false, uploaded: perfUploaded, parsed: false, detail: "Model accuracy and stability" },
+    { key: "hyperparams", label: "Hyperparameters", format: "JSON", required: false, uploaded: hyperparamsUploaded, parsed: false, detail: "Training configuration details" },
+  ] as const;
+  const reqTotal = artifactRows.filter((a) => a.required).length;
+  const reqUploaded = artifactRows.filter((a) => a.required && a.uploaded).length;
+
+  const attestationValues = [chkInventory, chkTier, chkArtifacts, chkPrevFindings, chkRegScope, chkIndependence, chkPlanApproved];
+  const attestedCount = attestationValues.filter(Boolean).length;
+  const allAttested = attestationValues.every(Boolean);
+
+  // Metadata completeness is a real, honestly-computed signal (not a Figma
+  // placeholder) — the 6 free-text fields a reviewer actually has to fill
+  // in; Model Type / Risk Tier are excluded since they always carry a
+  // selected default and can never be "incomplete".
+  const metadataFields = [modelName, owningTeam, modelOwner, leadValidator, version, purpose];
+  const metadataFilledCount = metadataFields.filter((v) => v.trim().length > 0).length;
+  const metadataComplete = metadataFilledCount === metadataFields.length;
+
   const loadDemo = async (mode: string) => {
     setDemoError(null);
     setDemoLoading(true);
@@ -516,105 +595,117 @@ function Intake() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <StageHero
+        eyebrow="STAGE 1 · MODEL VALIDATION"
         title={intake.title}
         description={intake.description}
+        chips={
+          <>
+            <HeroChip tone={readyCount >= 3 ? "success" : "neutral"}>{readyCount}/7 artifacts uploaded</HeroChip>
+            <HeroChip tone={chkAttestation ? "success" : "neutral"}>{chkAttestation ? "Attested" : "Attestation pending"}</HeroChip>
+          </>
+        }
       />
 
-      <Card className="p-6 shadow-elegant">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-foreground">Demo mode</div>
-            <p className="mt-2 max-w-xl text-sm text-muted-foreground">Load a pre-configured demo intake submission instead of uploading every artifact manually.</p>
+      {/* Readiness strip — every value is a real, live-computed signal from
+          the form/upload/attestation state below, never a fixed placeholder. */}
+      <KpiStrip
+        tiles={[
+          {
+            icon: Upload, label: "Artifacts Submitted", value: `${readyCount}/7`,
+            sub: `${reqUploaded} of ${reqTotal} required uploaded`, tone: reqUploaded === reqTotal ? "emerald" : "amber",
+          },
+          {
+            icon: ShieldCheck, label: "Governance Status", value: allAttested ? "Complete" : "Pending",
+            sub: `${attestedCount} of 7 controls attested`, tone: allAttested ? "violet" : "amber",
+          },
+          {
+            icon: FileText, label: "Model Metadata", value: metadataComplete ? "Complete" : "Incomplete",
+            sub: `${metadataFilledCount} of ${metadataFields.length} fields completed`, tone: metadataComplete ? "emerald" : "amber",
+          },
+          {
+            icon: ArrowRight, label: "Submission Readiness", value: chkAttestation ? "Ready" : "Not Ready",
+            sub: chkAttestation ? "All conditions satisfied" : "Complete attestation to proceed", tone: chkAttestation ? "emerald" : "slate",
+          },
+        ]}
+      />
+
+      <VCard icon={PlayCircle} title="Demo mode" sub="Load a pre-configured demo intake submission instead of uploading every artifact manually.">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex flex-1 flex-col gap-3 sm:flex-row">
+            {demoOptions.map((demo) => {
+              const [label, sub] = demo.key.split(" — ");
+              return (
+                <button
+                  key={demo.key}
+                  onClick={() => loadDemo(demo.mode)}
+                  disabled={demoLoading}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <div className="text-sm font-semibold text-slate-700">{label}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">{sub}</div>
+                </button>
+              );
+            })}
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {demoOptions.map((demo) => (
-              <button
-                key={demo.key}
-                className="group inline-flex min-h-[110px] w-full items-center justify-center rounded-3xl border border-border bg-background px-4 py-4 text-center text-sm font-semibold text-foreground transition hover:border-primary hover:text-primary"
-                onClick={() => loadDemo(demo.mode)}
-                disabled={demoLoading}
-              >
-                <span className="inline-flex flex-col items-center gap-2 text-sm font-semibold leading-tight">
-                  {demo.key.split(" — ").map((line, index) => (
-                    <span key={index} className={index === 1 ? "text-primary" : "text-foreground"}>
-                      {line}
-                    </span>
-                  ))}
-                </span>
-              </button>
-            ))}
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
+            <Badge variant="outline" className="border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {demoMode ?? "No demo loaded"}
+            </Badge>
+            {demoLoading ? <span className="text-xs text-slate-500">Loading demo...</span> : null}
+            {demoError ? <span className="text-xs text-amber-600">{demoError}</span> : null}
           </div>
         </div>
+      </VCard>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Badge variant="outline" className="border-border bg-background px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            {demoMode ?? "No demo loaded"}
-          </Badge>
-          {demoLoading ? <div className="text-xs text-muted-foreground">Loading demo...</div> : null}
-          {demoError ? <div className="text-xs text-amber-300">{demoError}</div> : null}
-        </div>
-      </Card>
-
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.55fr_0.95fr]">
-        <Card className="p-6 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">{intake.modelMetadata.title}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{intake.modelMetadata.description}</p>
-            </div>
-            <div
-              className={
-                intake.modelMetadata.registeredLabel === "Registered"
-                  ? "inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary"
-                  : "inline-flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-              }
-            >
-              <FileText className="h-3.5 w-3.5" /> {intake.modelMetadata.registeredLabel}
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model name</div>
-              <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Owning team / business unit</div>
-              <input value={owningTeam} onChange={(e) => setOwningTeam(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model owner (name)</div>
-              <input value={modelOwner} onChange={(e) => setModelOwner(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Lead validator (name)</div>
-              <input value={leadValidator} onChange={(e) => setLeadValidator(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model type</div>
-              <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground">
+      {/* Model profile + Risk tier / Target definition */}
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-5">
+        <VCard
+          icon={FileText}
+          title="Model Profile"
+          sub={intake.modelMetadata.description}
+          badge={{ text: intake.modelMetadata.registeredLabel, tone: intake.modelMetadata.registeredLabel === "Registered" ? "primary" : "slate" }}
+          className="xl:col-span-3"
+        >
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+            <Field label="Model Name">
+              <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full bg-transparent font-mono text-sm font-semibold text-slate-900 outline-none" />
+            </Field>
+            <Field label="Model Version">
+              <input value={version} onChange={(e) => setVersion(e.target.value)} className="w-full bg-transparent font-mono text-sm font-semibold text-slate-900 outline-none" />
+            </Field>
+            <Field label="Owning Team / Business Unit">
+              <input value={owningTeam} onChange={(e) => setOwningTeam(e.target.value)} className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none" />
+            </Field>
+            <Field label="Model Owner">
+              <input value={modelOwner} onChange={(e) => setModelOwner(e.target.value)} className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none" />
+            </Field>
+            <Field label="Lead Validator">
+              <input value={leadValidator} onChange={(e) => setLeadValidator(e.target.value)} className="w-full bg-transparent text-sm font-medium text-slate-800 outline-none" />
+            </Field>
+            <Field label="Model Type">
+              <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="w-full cursor-pointer bg-transparent text-sm font-semibold text-slate-800 outline-none">
                 <option>PD (Probability of Default)</option>
                 <option>LGD (Loss Given Default)</option>
                 <option>EAD (Exposure at Default)</option>
                 <option>Scorecard / Rating</option>
               </select>
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model version</div>
-              <input value={version} onChange={(e) => setVersion(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk tier</div>
-              <select value={tier} onChange={(e) => setTier(e.target.value)} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground">
+            </Field>
+            <Field label="Risk Tier" className="sm:col-span-2">
+              <select value={tier} onChange={(e) => setTier(e.target.value)} className="w-full cursor-pointer bg-transparent text-sm font-semibold text-blue-700 outline-none">
                 <option>Tier 1 — High Risk</option>
                 <option>Tier 2 — Medium Risk</option>
                 <option>Tier 3 — Low Risk</option>
               </select>
-            </div>
-            <div className="rounded-lg border border-border bg-background px-3 py-3 md:col-span-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Model purpose</div>
-              <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} className="mt-1 w-full bg-background px-2 py-2 text-sm font-semibold text-foreground" />
+            </Field>
+            <div className="sm:col-span-2">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Model Purpose</div>
+              <textarea
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
             </div>
           </div>
 
@@ -634,358 +725,358 @@ function Intake() {
               </span>
             </div>
           ) : null}
-        </Card>
+        </VCard>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-elegant">
-            <div className="text-sm font-semibold text-foreground">{intake.targetDefinition.title}</div>
-            <div className="mt-3 rounded-lg border border-border bg-background p-3 font-mono text-[12px] leading-6 text-foreground">
-              {intake.targetDefinition.expression}<br />
-              {intake.targetDefinition.detail}
-            </div>
-            <div className="mt-3 text-xs text-muted-foreground">
-              {intake.targetDefinition.baseRateLabel}: <span className="font-semibold text-foreground">{intake.targetDefinition.baseRate}</span> · {intake.targetDefinition.sampleSizeLabel}: {intake.targetDefinition.sampleSize}
-            </div>
-          </div>
-
-          {(() => {
-            const tone = riskTierTone(intake.riskTier.value);
-            return (
-              <div className={`rounded-xl border ${tone.border} ${tone.bg} p-5 shadow-elegant`}>
-                <div className={`text-sm font-semibold ${tone.text}`}>{intake.riskTier.title}</div>
-                <div className={`mt-2 text-3xl font-semibold ${tone.text}`}>{intake.riskTier.value}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{intake.riskTier.description}</div>
+        <div className="flex flex-col gap-4 xl:col-span-2">
+          <VCard title="Risk Tier" sub="Model risk classification">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-2xl bg-gradient-to-br from-blue-800 to-violet-800">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-white/60">Tier</span>
+                <span className="text-xl font-bold leading-none text-white">{tierNumber(intake.riskTier.value)}</span>
               </div>
-            );
-          })()}
+              <div>
+                <div className="text-sm font-bold text-slate-900">{intake.riskTier.value}</div>
+                <p className="mt-1 text-xs leading-snug text-slate-500">{intake.riskTier.description}</p>
+              </div>
+            </div>
+          </VCard>
+
+          <VCard title={intake.targetDefinition.title} className="flex-1">
+            <div className="font-mono text-sm font-bold text-slate-900">{intake.targetDefinition.expression}</div>
+            <p className="mt-1 text-xs text-slate-500">{intake.targetDefinition.detail}</p>
+            <div className="my-4 h-px bg-slate-100" />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">{intake.targetDefinition.baseRateLabel}</div>
+                <div className="mt-1 font-mono text-sm font-bold text-slate-900">{intake.targetDefinition.baseRate}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">{intake.targetDefinition.sampleSizeLabel}</div>
+                <div className="mt-1 font-mono text-sm font-bold text-slate-900">{intake.targetDefinition.sampleSize}</div>
+              </div>
+            </div>
+          </VCard>
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">{intake.artifactTitle}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">{intake.artifactDescription}</p>
+      {/* Artifact inventory — compact table; every upload/parse handler below
+          is identical to the previous card-grid layout, just relocated. */}
+      <VCard
+        icon={FileCheck}
+        title="Artifact Inventory"
+        sub="Uploaded evidence to support subsequent model validation stages"
+        actions={
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-medium text-slate-500">{readyCount} / 7 uploaded</span>
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${(readyCount / 7) * 100}%` }} />
+            </div>
           </div>
-          <div
-            className={
-              intake.artifacts.length > 0
-                ? "inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary"
-                : "inline-flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-            }
-          >
-            <FileCheck className="h-3.5 w-3.5" /> {intake.artifactSummary}
-          </div>
-        </div>
+        }
+        contentClassName="-mx-6 -mb-6"
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-y border-slate-100 bg-slate-50 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+                <th className="px-6 py-3">Required</th>
+                <th className="px-4 py-3">Artifact</th>
+                <th className="px-4 py-3">Format</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-6 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Validation Dataset</div>
+                  <div className="text-xs text-slate-400">{datasetFile ? datasetFile.name : profile?.dataset_name ?? "Needed for Stage 2 data checks"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">CSV / XLSX</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={datasetUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={datasetUploaded ? "Replace" : "Attach"}
+                    accept=".csv,.xlsx"
+                    onFile={async (f) => {
+                      setDatasetFile(f);
+                      try {
+                        const form = new FormData();
+                        form.append("file", f);
+                        const resp = await formUpload("/data/upload", form);
+                        setUploadResult(f, resp as any);
+                      } catch (err) {
+                        console.error("Dataset upload failed", err);
+                      }
+                    }}
+                  />
+                </td>
+              </tr>
 
-        {intake.artifacts.length > 0 ? (
-          <div className="mt-6 grid gap-3 lg:grid-cols-3">
-            {intake.artifacts.map((artifact) => (
-              <div key={artifact.fileName} className="rounded-lg border border-border bg-background p-4">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{artifact.fileName}</div>
-                <div className="mt-3 text-sm font-semibold text-foreground">{artifact.status}</div>
-                <div className="mt-2 text-[11px] text-muted-foreground">{artifact.timestamp}</div>
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Model Development Document</div>
+                  <div className="text-xs text-slate-400">{mddFileName ?? (mddText ? `Parsed ${mddText.length} chars` : "Governance evidence for Stage 1")}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">PDF / DOCX / TXT</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={mddUploaded} parsed={Boolean(mddMetrics)} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={mddUploaded ? "Replace" : "Attach"}
+                    accept=".pdf,.docx,.txt"
+                    onFile={async (f) => {
+                      setMddFileName(f.name);
+                      setParseError(null);
+                      try {
+                        const form = new FormData();
+                        form.append("mdd_file", f);
+                        const resp = await formUpload<Record<string, any>>("/validation/parse-mdd", form);
+                        setMddText(resp?.mdd_text ?? null);
+                        setMddMetrics(resp?.metrics ?? null);
+                        setMddDocumentPath(resp?.mdd_document_path ?? null);
+                        // Publish to shared context — Stage 3's RAG keyword-search
+                        // check (check_mdd_keywords) reads validationMddText from
+                        // here. Without this, an MDD uploaded via this input never
+                        // reaches Stage 3 and its RAG Agent Rules column stays empty.
+                        setValidationMddText(resp?.mdd_text ?? null);
+                        setValidationMddMetrics(resp?.metrics ?? null);
+                      } catch (err) {
+                        console.error("MDD parse failed", err);
+                        setMddText(null);
+                        setMddMetrics(null);
+                        setParseError(err instanceof Error ? err.message : "Failed to parse MDD file.");
+                      }
+                    }}
+                  />
+                </td>
+              </tr>
+
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Training Code / Scripts</div>
+                  <div className="text-xs text-slate-400">{trainingCodeFileName ?? "Required for replication and review"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">ZIP / PY / IPYNB</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={trainingCodeUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={trainingCodeUploaded ? "Replace" : "Attach"}
+                    accept=".zip,.py,.ipynb"
+                    onFile={(f) => setTrainingCodeFileName(f.name)}
+                  />
+                </td>
+              </tr>
+
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required={false} /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Data Profile</div>
+                  <div className="text-xs text-slate-400">{profileFileName ?? "Helps check feature coverage"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">CSV / XLSX / PDF</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={profileUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={profileUploaded ? "Replace" : "Attach"}
+                    accept=".csv,.xlsx,.pdf"
+                    onFile={(f) => setProfileFileName(f.name)}
+                  />
+                </td>
+              </tr>
+
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required={false} /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Assumptions &amp; Limitations</div>
+                  <div className="text-xs text-slate-400">{assumptionsFileName ?? "Model limitations and assumptions"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">PDF / DOCX / TXT</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={assumptionsUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={assumptionsUploaded ? "Replace" : "Attach"}
+                    accept=".pdf,.docx,.txt"
+                    onFile={(f) => setAssumptionsFileName(f.name)}
+                  />
+                </td>
+              </tr>
+
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required={false} /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Performance Report</div>
+                  <div className="text-xs text-slate-400">{perfFileName ?? "Model accuracy and stability"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">PDF / DOCX / XLSX</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={perfUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={perfUploaded ? "Replace" : "Attach"}
+                    accept=".pdf,.docx,.xlsx"
+                    onFile={(f) => setPerfFileName(f.name)}
+                  />
+                </td>
+              </tr>
+
+              <tr className="hover:bg-slate-50/60">
+                <td className="px-6 py-3.5"><RequiredBadge required={false} /></td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-slate-800">Hyperparameters</div>
+                  <div className="text-xs text-slate-400">{hyperparamsFileName ?? "Training configuration details"}</div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-slate-400">JSON</td>
+                <td className="px-4 py-3.5"><ArtifactStatus uploaded={hyperparamsUploaded} /></td>
+                <td className="px-6 py-3.5 text-right">
+                  <UploadAction
+                    label={hyperparamsUploaded ? "Replace" : "Attach"}
+                    accept=".json"
+                    onFile={(f) => setHyperparamsFileName(f.name)}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {parseError ? <div className="border-t border-slate-100 px-6 py-3 text-xs text-red-600">{parseError}</div> : null}
+      </VCard>
+
+      {/* Extracted MDD metrics — renders whatever real keys the backend
+          parser actually returned; never a fixed set of metric names. */}
+      <VCard
+        icon={FileCheck}
+        title="Extracted MDD Metrics"
+        sub="Parsed from the Model Development Document"
+        badge={mddMetrics ? { text: "Parsed · MDD", tone: "primary" } : undefined}
+      >
+        {mddMetrics ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Object.entries(mddMetrics).map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+                <div className="text-[10px] uppercase tracking-wider text-slate-400">{label.replace(/_/g, " ")}</div>
+                <div className="mt-1 font-mono text-xl font-bold text-slate-900">{value ?? "—"}</div>
               </div>
             ))}
           </div>
+        ) : mddText ? (
+          <div className="text-sm text-slate-500">No reported metrics were detected in the uploaded MDD.</div>
         ) : (
-          <div className="mt-6 rounded-lg border border-dashed border-border bg-background p-6 text-center text-sm text-muted-foreground">
-            No artifacts on file yet — load a demo above or upload files below.
-          </div>
+          <VEmptyState
+            icon={FileText}
+            title="No metrics extracted yet"
+            description="Upload and parse a Model Development Document above to see its reported metrics here."
+          />
         )}
+      </VCard>
 
-        <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          {/* Dataset upload */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Validation dataset (CSV / XLSX) *</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{datasetFile ? datasetFile.name : profile?.dataset_name ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".csv,.xlsx" className="hidden" onChange={async (e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  if (!f) return;
-                  setDatasetFile(f);
-                  try {
-                    const form = new FormData();
-                    form.append("file", f);
-                    const resp = await formUpload("/data/upload", form);
-                    // store into dataset context
-                    setUploadResult(f, resp as any);
-                  } catch (err) {
-                    console.error("Dataset upload failed", err);
-                  }
-                }} />
-                <span className="text-xs text-primary">Upload</span>
-              </label>
+      {/* Governance */}
+      <VCard icon={ShieldCheck} title="Regulatory Frameworks &amp; Governance" sub={intake.governance.description}>
+        <div className="grid grid-cols-1 divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0">
+          <div className="pb-5 md:pb-0 md:pr-6">
+            <div className="mb-3 text-sm font-semibold text-slate-700">Applicable Regulatory Frameworks</div>
+            <div className="space-y-3">
+              {[
+                { key: "IFRS9", label: "IFRS 9", sub: "Financial Instruments" },
+                { key: "SS1/23", label: "SS1/23", sub: "PRA Model Risk Management" },
+                { key: "RBI", label: "RBI Model Risk Management", sub: "Reserve Bank of India guidance" },
+              ].map((fw) => (
+                <label key={fw.key} className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-blue-600"
+                    checked={frameworks.includes(fw.key)}
+                    onChange={() => toggleFramework(fw.key)}
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-slate-800">{fw.label}</div>
+                    <div className="text-xs text-slate-400">{fw.sub}</div>
+                  </div>
+                </label>
+              ))}
             </div>
           </div>
 
-          {/* MDD upload */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Model Development Document (PDF / DOCX / TXT) *</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{mddFileName ?? (mddText ? `Parsed ${mddText.length} chars` : "No MDD uploaded")}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={async (e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  if (!f) return;
-                  setMddFileName(f.name);
-                  setParseError(null);
-                  try {
-                    const form = new FormData();
-                    form.append("mdd_file", f);
-                    const resp = await formUpload<Record<string, any>>("/validation/parse-mdd", form);
-                    setMddText(resp?.mdd_text ?? null);
-                    setMddMetrics(resp?.metrics ?? null);
-                    setMddDocumentPath(resp?.mdd_document_path ?? null);
-                    // Publish to shared context — Stage 3's RAG keyword-search
-                    // check (check_mdd_keywords) reads validationMddText from
-                    // here. Without this, an MDD uploaded via this input never
-                    // reaches Stage 3 and its RAG Agent Rules column stays empty.
-                    setValidationMddText(resp?.mdd_text ?? null);
-                    setValidationMddMetrics(resp?.metrics ?? null);
-                  } catch (err) {
-                    console.error("MDD parse failed", err);
-                    setMddText(null);
-                    setMddMetrics(null);
-                    setParseError(err instanceof Error ? err.message : "Failed to parse MDD file.");
-                  }
-                }} />
-                <span className="text-xs text-primary">Upload & Parse</span>
-              </label>
-            </div>
-            {parseError ? <div className="mt-2 text-xs text-red-500">{parseError}</div> : null}
-            {mddMetrics ? (
-              <div className="mt-4 rounded-lg border border-border bg-slate-950/50 p-3 text-sm text-foreground">
-                <div className="font-semibold">Extracted MDD metrics</div>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {Object.entries(mddMetrics).map(([label, value]) => (
-                    <div key={label} className="rounded-lg bg-background/70 px-3 py-2">
-                      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label.replace(/_/g, " ")}</div>
-                      <div className="mt-1 text-sm font-semibold text-foreground">{value ?? "—"}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : mddText ? (
-              <div className="mt-4 text-xs text-muted-foreground">No reported metrics were detected in the uploaded MDD.</div>
-            ) : null}
-          </div>
-
-          {/* Training code */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Training code / scripts (ZIP / PY / IPYNB) *</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{trainingCodeFileName ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".zip,.py,.ipynb" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) setTrainingCodeFileName(f.name); }} />
-                <span className="text-xs text-primary">Attach</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Data profile (optional) */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Data profile (CSV / XLSX / PDF)</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{profileFileName ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".csv,.xlsx,.pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) setProfileFileName(f.name); }} />
-                <span className="text-xs text-primary">Attach</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Assumptions & limitations (optional) */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Assumptions &amp; limitations (PDF / DOCX / TXT)</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{assumptionsFileName ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) setAssumptionsFileName(f.name); }} />
-                <span className="text-xs text-primary">Attach</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Performance report (optional) */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Performance report (PDF / DOCX / XLSX)</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{perfFileName ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".pdf,.docx,.xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) setPerfFileName(f.name); }} />
-                <span className="text-xs text-primary">Attach</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Hyperparameters (optional) */}
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-semibold text-foreground">Hyperparameters (JSON)</div>
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">{hyperparamsFileName ?? "No file uploaded"}</div>
-              <label className="inline-flex items-center gap-2 cursor-pointer rounded bg-card px-2 py-1">
-                <Upload className="h-4 w-4" />
-                <input type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) setHyperparamsFileName(f.name); }} />
-                <span className="text-xs text-primary">Attach</span>
-              </label>
+          <div className="pt-5 md:pl-6 md:pt-0">
+            <div className="mb-3 text-sm font-semibold text-slate-700">{intake.governance.title}</div>
+            <div className="space-y-2.5">
+              {(
+                [
+                  [intake.governance.checklist[0], chkInventory, setChkInventory],
+                  [intake.governance.checklist[1], chkTier, setChkTier],
+                  [intake.governance.checklist[2], chkArtifacts, setChkArtifacts],
+                  [intake.governance.checklist[3], chkPrevFindings, setChkPrevFindings],
+                  [intake.governance.checklist[4], chkRegScope, setChkRegScope],
+                  [intake.governance.checklist[5], chkIndependence, setChkIndependence],
+                  [intake.governance.checklist[6], chkPlanApproved, setChkPlanApproved],
+                ] as [string, boolean, (v: boolean) => void][]
+              ).map(([label, checked, setChecked]) => (
+                <label key={label} className="flex cursor-pointer items-start gap-3">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 accent-blue-600" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+                  <span className="text-sm leading-snug text-slate-700">{label}</span>
+                </label>
+              ))}
             </div>
           </div>
         </div>
-      </section>
+      </VCard>
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-foreground">Artifact completeness</div>
-            <p className="mt-2 text-xs text-muted-foreground">Required items must be present before intake submission. Optional artifacts provide better detail for later validation stages.</p>
-          </div>
-          <div className="rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            {readyCount}/7 uploaded
-          </div>
+      {/* Attestation & submission — merges the previous "Attestation" card
+          and the trailing "next step" card into one workspace, per Figma. */}
+      <VCard icon={ClipboardCheck} title="Attestation &amp; Submission" sub={intake.nextStep.description}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <ReadinessCheck label="Required information complete" ok={metadataComplete} />
+          <ReadinessCheck label="Required evidence uploaded" ok={reqUploaded === reqTotal} />
+          <ReadinessCheck label="Governance controls reviewed" ok={allAttested} />
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            { label: "Submitted Dataset", uploaded: datasetUploaded, required: true, detail: "Needed for Stage 2 data checks" },
-            { label: "Model Dev Document", uploaded: mddUploaded, required: true, detail: "Governance evidence for Stage 1" },
-            { label: "Training Code", uploaded: trainingCodeUploaded, required: true, detail: "Required for replication and review" },
-            { label: "Data Profile", uploaded: profileUploaded, required: false, detail: "Helps check feature coverage" },
-            { label: "Assumptions", uploaded: assumptionsUploaded, required: false, detail: "Model limitations and assumptions" },
-            { label: "Performance Report", uploaded: perfUploaded, required: false, detail: "Model accuracy and stability" },
-            { label: "Hyperparameters", uploaded: hyperparamsUploaded, required: false, detail: "Training configuration details" },
-          ].map((item) => {
-            // Uploaded = same "good/complete" treatment used for PASS states
-            // elsewhere in the app (bg-primary-soft/border-primary). Pending
-            // is deliberately NOT urgency-coded by Required/Optional — both
-            // look identical; only the caption text ("REQUIRED"/"OPTIONAL")
-            // differentiates them, same as before this pass.
-            const tone = item.uploaded
-              ? { border: "border-primary/30", bg: "bg-primary-soft", status: "text-primary", Icon: CheckCircle2 }
-              : { border: "border-border", bg: "bg-background", status: "text-muted-foreground", Icon: Circle };
-            return (
-              <div key={item.label} className={`rounded-lg border ${tone.border} ${tone.bg} p-4`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{item.label}</div>
-                  <tone.Icon className={`h-3.5 w-3.5 shrink-0 ${tone.status}`} />
-                </div>
-                <div className={`mt-2 text-base font-medium ${tone.status}`}>{item.uploaded ? "Uploaded" : "Pending"}</div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {item.required ? "REQUIRED" : "OPTIONAL"} · {item.detail}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        <div className="my-5 border-t border-slate-100" />
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="rounded-xl border border-border p-4">
-          <div className="mb-2 text-sm font-medium">Applicable Regulatory Frameworks</div>
-          {[
-            { key: "IFRS9", label: "IFRS 9" },
-            { key: "SS1/23", label: "SS1/23" },
-            { key: "RBI", label: "RBI Model Risk Management" },
-          ].map((fw) => (
-            <label key={fw.key} className="flex items-center gap-2 py-1 text-sm">
-              <input
-                type="checkbox"
-                checked={frameworks.includes(fw.key)}
-                onChange={() => toggleFramework(fw.key)}
-              />
-              {fw.label}
-            </label>
-          ))}
-        </div>
-
-        <div className="mt-5">
-          <h3 className="text-sm font-semibold text-foreground">{intake.governance.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{intake.governance.description}</p>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkInventory} onChange={(e) => setChkInventory(e.target.checked)} />
-            <span>{intake.governance.checklist[0]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkTier} onChange={(e) => setChkTier(e.target.checked)} />
-            <span>{intake.governance.checklist[1]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkArtifacts} onChange={(e) => setChkArtifacts(e.target.checked)} />
-            <span>{intake.governance.checklist[2]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkPrevFindings} onChange={(e) => setChkPrevFindings(e.target.checked)} />
-            <span>{intake.governance.checklist[3]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkRegScope} onChange={(e) => setChkRegScope(e.target.checked)} />
-            <span>{intake.governance.checklist[4]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkIndependence} onChange={(e) => setChkIndependence(e.target.checked)} />
-            <span>{intake.governance.checklist[5]}</span>
-          </label>
-          <label className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-sm">
-            <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkPlanApproved} onChange={(e) => setChkPlanApproved(e.target.checked)} />
-            <span>{intake.governance.checklist[6]}</span>
-          </label>
-        </div>
-      </section>
-
-      {/* Attestation and Submit */}
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="mb-4 text-sm text-muted-foreground">Confirm that all required artifacts are uploaded and the validation readiness checklist is complete. Use the button below to save progress without submitting.</div>
-        <label className="flex items-center gap-3 mb-4">
-          <input type="checkbox" className="h-4 w-4 accent-primary" checked={chkAttestation} onChange={(e) => setChkAttestation(e.target.checked)} />
-          <span className="text-sm">I confirm the above information is accurate and complete</span>
+        <label className="mb-5 flex cursor-pointer items-center gap-3">
+          <input type="checkbox" className="h-4 w-4 accent-blue-600" checked={chkAttestation} onChange={(e) => setChkAttestation(e.target.checked)} />
+          <span className="text-sm text-slate-700">I confirm the above information is accurate and complete</span>
         </label>
-        {submitError ? <div className="mb-4 text-sm text-red-500">{submitError}</div> : null}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => void saveDraft()}
-            disabled={!modelName.trim() || draftSaving}
-            title={!modelName.trim() ? "Enter a model name to save a draft." : undefined}
-          >
-            {draftSaving ? "Saving…" : "Save draft"}
-          </button>
-          {!modelName.trim() ? (
-            <span className="text-xs text-muted-foreground">Enter a model name to save a draft.</span>
-          ) : draftSavedAt ? (
-            <span className="text-xs text-muted-foreground">Draft saved {draftSavedAt} — keyed to model name "{modelName.trim()}"</span>
-          ) : null}
-          {draftLoadError ? <span className="text-xs text-destructive">{draftLoadError}</span> : null}
-        </div>
-      </section>
 
-      <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-muted-foreground">{intake.nextStep.description}</div>
-          <button
-            type="button"
-            onClick={handleProceed}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90"
-          >
-            <span>{intake.nextStep.label}</span>
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
-        {proceedError ? (
-          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            {proceedError}
+        {submitError ? <div className="mb-4 text-sm text-red-600">{submitError}</div> : null}
+        {proceedError ? <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{proceedError}</div> : null}
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void saveDraft()}
+              disabled={!modelName.trim() || draftSaving}
+              title={!modelName.trim() ? "Enter a model name to save a draft." : undefined}
+            >
+              {draftSaving ? "Saving…" : "Save draft"}
+            </button>
+            {!modelName.trim() ? (
+              <span className="text-xs text-slate-500">Enter a model name to save a draft.</span>
+            ) : draftSavedAt ? (
+              <span className="text-xs text-slate-500">Draft saved {draftSavedAt} — keyed to model name "{modelName.trim()}"</span>
+            ) : null}
+            {draftLoadError ? <span className="text-xs text-red-600">{draftLoadError}</span> : null}
           </div>
-        ) : null}
-      </section>
+
+          <div className="flex items-center gap-3">
+            {!chkAttestation ? (
+              <p className="flex items-center gap-1.5 text-sm text-amber-600">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Complete all requirements to proceed
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleProceed}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#2f67ff] px-6 py-2.5 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
+            >
+              <span>{intake.nextStep.label}</span>
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </VCard>
     </div>
   );
 }

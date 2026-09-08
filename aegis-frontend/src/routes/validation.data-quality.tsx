@@ -1,14 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageHeader } from "@/components/app-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card as UiCard } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckSummaryTiles, deriveCheckTotal } from "@/components/check-summary";
 import { useDataset } from "@/lib/app-context";
 import { formUpload } from "@/lib/api";
-import { ArrowRight, AlertTriangle, AlertCircle, Clock, Check } from "lucide-react";
+import { ArrowRight, AlertTriangle, AlertCircle, Clock, Check, Database, Ruler, Bot, Gauge, ShieldCheck, Download, Droplet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useResumeState } from "@/hooks/use-resume-state";
+import { StageHero, HeroChip, VCard, VEmptyState } from "@/components/validation-ui";
 
 export const Route = createFileRoute("/validation/data-quality")({
   head: () => ({ meta: [{ title: "Stage 2 — Data & Model Soundness — Aegis Credit" }] }),
@@ -537,20 +535,33 @@ function DataQuality() {
     return summary;
   }, [conceptualData]);
 
+  const activeTabLabel = activeTab === "data-validation" ? "data validation" : "conceptual soundness";
+  const activeTabSummary = activeTab === "data-validation" ? summary : conceptualSummary;
+  const activeTabHasRun = activeTab === "data-validation" ? Boolean(data) : Boolean(conceptualData);
+
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Stage 2 — Data & Model Soundness"
+    <div className="space-y-6">
+      <StageHero
+        eyebrow="STAGE 2 · MODEL VALIDATION"
+        title="Data & Model Soundness"
         description="Is the dataset complete and representative, and are the chosen features, methodology, and assumptions appropriate for the stated business objective and regulatory context?"
+        chips={
+          activeTabHasRun ? (
+            <HeroChip tone="success">
+              {activeTabSummary.pass}/{deriveCheckTotal(activeTabSummary)} {activeTabLabel} checks passed
+            </HeroChip>
+          ) : (
+            <HeroChip>Not yet run</HeroChip>
+          )
+        }
       />
 
       {!datasetLoaded ? (
-        <div className="rounded-xl border border-border bg-card p-6 text-center">
-          <h3 className="text-lg font-semibold">No dataset available</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Upload a dataset and complete Intake before these checks can run.
-          </p>
-        </div>
+        <VEmptyState
+          icon={Database}
+          title="No dataset available"
+          description="Upload a dataset and complete Intake before these checks can run."
+        />
       ) : (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList>
@@ -558,209 +569,46 @@ function DataQuality() {
             <TabsTrigger value="conceptual">Conceptual Soundness</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="data-validation" className="space-y-8 pt-4">
+          <TabsContent value="data-validation" className="space-y-6 pt-4">
             {checksLoading ? (
-              <div className="rounded-xl border border-border bg-card p-6 text-center">Loading Data Validation...</div>
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center">Loading Data Validation...</div>
             ) : checksError ? (
-              <div className="rounded-xl border border-border bg-card p-6 text-destructive">Error loading Stage 2: {checksError}</div>
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">Error loading Stage 2: {checksError}</div>
             ) : (
               <>
-                <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold">Data Validation Results</h3>
-                    <button
-                      type="button"
-                      onClick={downloadValidationReport}
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                    >
-                      Download CSV
-                    </button>
-                  </div>
-                  <ComplianceSummaryRow summary={summary} />
-                </section>
-
-                <section className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2">
-                  <div className="min-w-0">
-                    <div className="mb-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
-                      <div className="text-sm font-bold text-primary">📐 Threshold checks</div>
-                      <div className="text-xs text-muted-foreground">Quantitative checks against regulatory thresholds</div>
-                    </div>
-                    {data?.thresholdChecks && data.thresholdChecks.length > 0 ? (
-                      <ThresholdPanel
-                        checks={data.thresholdChecks}
-                        profileSource={validationProfile ?? profile}
-                        selectedFrameworks={selectedFrameworkLabels}
-                      />
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                        No threshold checks were returned for this stage.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="mb-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-violet-500">🤖 RAG agent rules</div>
-                        {llmLoading && (
-                          <span className="flex items-center gap-1 text-xs font-medium text-violet-500">
-                            <Clock className="h-3 w-3 animate-pulse" /> AI reviewing documentation…
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Regulatory rules fetched from knowledge store
-                        {selectedFrameworkLabels.length > 0 ? ` (${selectedFrameworkLabels.join(", ")})` : ""}
-                      </div>
-                    </div>
-                    {data?.ragRules && data.ragRules.length > 0 ? (
-                      <RagRulesPanel rules={data.ragRules} />
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                        No RAG agent flags generated for this stage.
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section className={`rounded-xl border p-6 ${regulatoryVerdictStyle(data?.regulatoryAlignment?.verdict).border} ${regulatoryVerdictStyle(data?.regulatoryAlignment?.verdict).bg}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-foreground/70">Regulatory alignment</div>
-                    <span className={`text-xs font-bold uppercase tracking-wide ${regulatoryVerdictStyle(data?.regulatoryAlignment?.verdict).text}`}>
-                      {regulatoryVerdictStyle(data?.regulatoryAlignment?.verdict).icon} {data?.regulatoryAlignment?.verdict ?? "—"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm">
-                    Pass/Warn/Fail: {data?.regulatoryAlignment?.counts?.pass ?? 0}/{data?.regulatoryAlignment?.counts?.warn ?? 0}/
-                    {data?.regulatoryAlignment?.counts?.fail ?? 0}
-                  </p>
-                  {data?.regulatoryAlignment?.remediation_summary && (
-                    <p className="mt-3 text-sm text-muted-foreground">{data.regulatoryAlignment.remediation_summary}</p>
-                  )}
-                  {selectedFrameworkLabels.length > 0 || data?.regulatoryAlignment?.regulatory_references?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {(selectedFrameworkLabels.length > 0 ? selectedFrameworkLabels : data?.regulatoryAlignment?.regulatory_references ?? []).map((ref: string) => (
-                        <span
-                          key={ref}
-                          className="rounded-full border border-primary/20 bg-background px-3 py-1 text-xs font-medium text-foreground/80"
-                        >
-                          {ref}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {data?.regulatoryAlignment?.high_severity_fails?.length ? (
-                    <div className="mt-3 text-sm text-destructive">
-                      High severity fails: {data.regulatoryAlignment.high_severity_fails.length}
-                    </div>
-                  ) : null}
-                </section>
-
+                <SoundnessWorkspace
+                  resultsTitle="Data Validation Results"
+                  summary={summary}
+                  checkData={data}
+                  profileSource={validationProfile ?? profile}
+                  selectedFrameworkLabels={selectedFrameworkLabels}
+                  llmLoading={llmLoading}
+                  showDownload
+                  onDownload={downloadValidationReport}
+                  showLeakage
+                  validationProfile={validationProfile}
+                />
                 {runError ? (
                   <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{runError}</div>
                 ) : null}
-
-                <div className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-                  <h3 className="text-sm font-semibold">Data leakage detection</h3>
-                  <p className="mt-2 text-sm text-foreground/80">
-                    {validationProfile?.leakage_risk_cols && validationProfile.leakage_risk_cols.length > 0
-                      ? `Potential leakage detected: ${validationProfile.leakage_risk_cols.join(", ")}`
-                      : "No potential target leakage detected in the current dataset."}
-                  </p>
-                </div>
               </>
             )}
           </TabsContent>
 
-          <TabsContent value="conceptual" className="space-y-8 pt-4">
+          <TabsContent value="conceptual" className="space-y-6 pt-4">
             {conceptualLoading ? (
-              <div className="rounded-xl border border-border bg-card p-6 text-center">Loading Conceptual Soundness...</div>
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center">Loading Conceptual Soundness...</div>
             ) : conceptualError ? (
-              <div className="rounded-xl border border-border bg-card p-6 text-destructive">Error loading Stage 2: {conceptualError}</div>
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">Error loading Stage 2: {conceptualError}</div>
             ) : (
-              <>
-                <section className="rounded-xl border border-border bg-card p-6 shadow-elegant">
-                  <h3 className="mb-4 text-sm font-semibold">Conceptual Soundness Results</h3>
-                  <ComplianceSummaryRow summary={conceptualSummary} />
-                </section>
-
-                <section className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2">
-                  <div className="min-w-0">
-                    <div className="mb-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
-                      <div className="text-sm font-bold text-primary">📐 Threshold checks</div>
-                      <div className="text-xs text-muted-foreground">Quantitative checks against regulatory thresholds</div>
-                    </div>
-                    {conceptualData?.thresholdChecks && conceptualData.thresholdChecks.length > 0 ? (
-                      <ThresholdPanel
-                        checks={conceptualData.thresholdChecks}
-                        profileSource={validationProfile ?? profile}
-                        selectedFrameworks={selectedFrameworkLabels}
-                      />
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                        No threshold checks generated for this stage.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="mb-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-violet-500">🤖 RAG agent rules</div>
-                        {conceptualLlmLoading && (
-                          <span className="flex items-center gap-1 text-xs font-medium text-violet-500">
-                            <Clock className="h-3 w-3 animate-pulse" /> AI reviewing documentation…
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Regulatory rules fetched from knowledge store
-                        {selectedFrameworkLabels.length > 0 ? ` (${selectedFrameworkLabels.join(", ")})` : ""}
-                      </div>
-                    </div>
-                    {conceptualData?.ragRules && conceptualData.ragRules.length > 0 ? (
-                      <RagRulesPanel rules={conceptualData.ragRules} />
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                        No RAG agent flags generated for this stage.
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section className={`rounded-xl border p-6 ${regulatoryVerdictStyle(conceptualData?.regulatoryAlignment?.verdict).border} ${regulatoryVerdictStyle(conceptualData?.regulatoryAlignment?.verdict).bg}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-foreground/70">Regulatory alignment</div>
-                    <span className={`text-xs font-bold uppercase tracking-wide ${regulatoryVerdictStyle(conceptualData?.regulatoryAlignment?.verdict).text}`}>
-                      {regulatoryVerdictStyle(conceptualData?.regulatoryAlignment?.verdict).icon} {conceptualData?.regulatoryAlignment?.verdict ?? "—"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm">
-                    Pass/Warn/Fail: {conceptualData?.regulatoryAlignment?.counts?.pass ?? 0}/{conceptualData?.regulatoryAlignment?.counts?.warn ?? 0}/
-                    {conceptualData?.regulatoryAlignment?.counts?.fail ?? 0}
-                  </p>
-                  {conceptualData?.regulatoryAlignment?.remediation_summary && (
-                    <p className="mt-3 text-sm text-muted-foreground">{conceptualData.regulatoryAlignment.remediation_summary}</p>
-                  )}
-                  {selectedFrameworkLabels.length > 0 || conceptualData?.regulatoryAlignment?.regulatory_references?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {(selectedFrameworkLabels.length > 0 ? selectedFrameworkLabels : conceptualData?.regulatoryAlignment?.regulatory_references ?? []).map((ref: string) => (
-                        <span
-                          key={ref}
-                          className="rounded-full border border-primary/20 bg-background px-3 py-1 text-xs font-medium text-foreground/80"
-                        >
-                          {ref}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {conceptualData?.regulatoryAlignment?.high_severity_fails?.length ? (
-                    <div className="mt-3 text-sm text-destructive">
-                      High severity fails: {conceptualData.regulatoryAlignment.high_severity_fails.length}
-                    </div>
-                  ) : null}
-                </section>
-              </>
+              <SoundnessWorkspace
+                resultsTitle="Conceptual Soundness Results"
+                summary={conceptualSummary}
+                checkData={conceptualData}
+                profileSource={validationProfile ?? profile}
+                selectedFrameworkLabels={selectedFrameworkLabels}
+                llmLoading={conceptualLlmLoading}
+              />
             )}
           </TabsContent>
         </Tabs>
@@ -771,7 +619,7 @@ function DataQuality() {
           <button
             type="button"
             onClick={() => setActiveTab("conceptual")}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
           >
             Continue
             <ArrowRight className="h-4 w-4" />
@@ -779,7 +627,7 @@ function DataQuality() {
         ) : (
           <Link
             to="/validation/challenger"
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-elegant hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2f67ff] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_10px_rgba(47,103,255,0.18)] hover:bg-[#285ee6]"
           >
             Continue to Stage 3
             <ArrowRight className="h-4 w-4" />
@@ -796,19 +644,6 @@ const STATUS_STYLES: Record<string, { border: string; bg: string; badge: string;
   FAIL: { border: "border-red-500/40", bg: "bg-red-500/10", badge: "bg-red-500 text-red-950", icon: "🔴" },
   PENDING: { border: "border-slate-400/40", bg: "bg-slate-400/10", badge: "bg-slate-400 text-slate-950", icon: "⏱️" },
 };
-
-// Mirrors the Findings page's VERDICT_STYLES convention — the regulatory
-// alignment card should reflect the actual verdict, not always render as a
-// green "all good" card regardless of whether it's PASS/CONDITIONAL/FAIL.
-const REGULATORY_VERDICT_STYLES: Record<string, { border: string; bg: string; text: string; icon: string }> = {
-  PASS: { border: "border-emerald-500/40", bg: "bg-emerald-500/10", text: "text-emerald-700 dark:text-emerald-300", icon: "✅" },
-  CONDITIONAL: { border: "border-amber-500/40", bg: "bg-amber-500/10", text: "text-amber-700 dark:text-amber-300", icon: "⚠️" },
-  FAIL: { border: "border-red-500/40", bg: "bg-red-500/10", text: "text-red-700 dark:text-red-300", icon: "❌" },
-};
-
-function regulatoryVerdictStyle(verdict: string | undefined) {
-  return REGULATORY_VERDICT_STYLES[verdict ?? ""] ?? { border: "border-border", bg: "bg-card", text: "text-foreground", icon: "⚪" };
-}
 
 const CHECK_SOURCE_LABELS: Record<string, { label: string; classes: string }> = {
   llm: { label: "🤖 LLM", classes: "bg-violet-500 text-violet-950" },
@@ -872,7 +707,7 @@ function ComplianceSummaryRow({
   const total = deriveCheckTotal(summary);
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-4 rounded-xl border border-border bg-background p-4">
+      <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
         <ComplianceDonut pass={summary.pass} warn={summary.warn} fail={summary.fail} />
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">Checks passed</div>
@@ -883,6 +718,128 @@ function ComplianceSummaryRow({
       </div>
       <CheckSummaryTiles summary={summary} checksLabel="Checks" />
     </div>
+  );
+}
+
+function regulatoryBadgeTone(verdict: string | undefined): "emerald" | "amber" | "rose" | "slate" {
+  if (verdict === "PASS") return "emerald";
+  if (verdict === "CONDITIONAL") return "amber";
+  if (verdict === "FAIL") return "rose";
+  return "slate";
+}
+
+// ── One analytical workspace shared by both sub-tabs (Data Validation /
+// Conceptual Soundness) — Results → Threshold checks → RAG agent rules →
+// Regulatory alignment → optional leakage note, each its own full-width
+// VCard rather than the previous cramped 2-column layout. Every value comes
+// from the `checkData` (StageCheckResponse) the caller already fetched. ──
+function SoundnessWorkspace({
+  resultsTitle,
+  summary,
+  checkData,
+  profileSource,
+  selectedFrameworkLabels,
+  llmLoading,
+  showDownload,
+  onDownload,
+  showLeakage,
+  validationProfile,
+}: {
+  resultsTitle: string;
+  summary: { total: number; pass: number; warn: number; fail: number; pending?: number; na?: number };
+  checkData: StageCheckResponse | null;
+  profileSource: any;
+  selectedFrameworkLabels: string[];
+  llmLoading: boolean;
+  showDownload?: boolean;
+  onDownload?: () => void;
+  showLeakage?: boolean;
+  validationProfile?: any;
+}) {
+  const alignment = checkData?.regulatoryAlignment;
+
+  return (
+    <>
+      <VCard
+        icon={Gauge}
+        title={resultsTitle}
+        actions={
+          showDownload ? (
+            <button
+              type="button"
+              onClick={onDownload}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" /> Download CSV
+            </button>
+          ) : undefined
+        }
+      >
+        <ComplianceSummaryRow summary={summary} />
+      </VCard>
+
+      <VCard icon={Ruler} title="Threshold checks" sub="Quantitative checks against regulatory thresholds">
+        {checkData?.thresholdChecks && checkData.thresholdChecks.length > 0 ? (
+          <ThresholdPanel checks={checkData.thresholdChecks} profileSource={profileSource} selectedFrameworks={selectedFrameworkLabels} />
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500">
+            No threshold checks were returned for this stage.
+          </div>
+        )}
+      </VCard>
+
+      <VCard
+        icon={Bot}
+        title="RAG agent rules"
+        sub={`Regulatory rules fetched from knowledge store${selectedFrameworkLabels.length > 0 ? ` (${selectedFrameworkLabels.join(", ")})` : ""}`}
+        actions={
+          llmLoading ? (
+            <span className="flex items-center gap-1 text-xs font-medium text-violet-500">
+              <Clock className="h-3 w-3 animate-pulse" /> AI reviewing documentation…
+            </span>
+          ) : undefined
+        }
+      >
+        {checkData?.ragRules && checkData.ragRules.length > 0 ? (
+          <RagRulesPanel rules={checkData.ragRules} />
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500">
+            No RAG agent flags generated for this stage.
+          </div>
+        )}
+      </VCard>
+
+      <VCard icon={ShieldCheck} title="Regulatory Alignment" badge={{ text: alignment?.verdict ?? "—", tone: regulatoryBadgeTone(alignment?.verdict) }}>
+        <p className="text-sm text-foreground/80">
+          Pass/Warn/Fail: {alignment?.counts?.pass ?? 0}/{alignment?.counts?.warn ?? 0}/{alignment?.counts?.fail ?? 0}
+        </p>
+        {alignment?.remediation_summary ? (
+          <p className="mt-3 text-sm text-muted-foreground">{alignment.remediation_summary}</p>
+        ) : null}
+        {selectedFrameworkLabels.length > 0 || alignment?.regulatory_references?.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(selectedFrameworkLabels.length > 0 ? selectedFrameworkLabels : alignment?.regulatory_references ?? []).map((ref: string) => (
+              <span key={ref} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                {ref}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {alignment?.high_severity_fails?.length ? (
+          <div className="mt-3 text-sm font-semibold text-red-600">High severity fails: {alignment.high_severity_fails.length}</div>
+        ) : null}
+      </VCard>
+
+      {showLeakage ? (
+        <VCard icon={Droplet} title="Data leakage detection">
+          <p className="text-sm text-foreground/80">
+            {validationProfile?.leakage_risk_cols && validationProfile.leakage_risk_cols.length > 0
+              ? `Potential leakage detected: ${validationProfile.leakage_risk_cols.join(", ")}`
+              : "No potential target leakage detected in the current dataset."}
+          </p>
+        </VCard>
+      ) : null}
+    </>
   );
 }
 
@@ -1097,7 +1054,7 @@ function ThresholdPanel({
   return (
     <div>
       <div className="mb-2 text-xs text-muted-foreground">Tap a tile for detail</div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
         {sorted.map((c) => (
           <ThresholdTile key={c.check_id} check={c} active={selectedId === c.check_id} onClick={() => setSelectedId(c.check_id)} />
         ))}
@@ -1124,7 +1081,7 @@ function RagRuleRow({ rule, active, onClick }: { rule: RagRule; active: boolean;
       type="button"
       onClick={onClick}
       className={`flex w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
-        active ? `${s.border} ${s.bg}` : "border-border bg-card hover:bg-muted/50"
+        active ? `${s.border} ${s.bg}` : "border-slate-200 bg-white hover:bg-slate-50"
       }`}
     >
       <span className="shrink-0">{statusIcon(eff)}</span>
@@ -1201,7 +1158,7 @@ function RagRulesPanel({ rules }: { rules: RagRule[] }) {
             <RagRuleRow key={r.rule_id} rule={r} active={selected?.rule_id === r.rule_id} onClick={() => setSelectedId(r.rule_id)} />
           ))
         ) : (
-          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
             No rules match this filter.
           </div>
         )}
